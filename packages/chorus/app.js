@@ -37,6 +37,15 @@ const CSS_TEXT = `
     max-width: 340px;
   }
   .trigger:hover { background: #222; transform: translateY(-1px); }
+  /* When rendered inside an iframe with data-preview-mode="full" (the
+     chorus-on-chorus demo), flip to the opposite corner so two FABs (outer
+     stable + inner branch-version) don't stack on top of each other. */
+  .trigger.in-iframe {
+    bottom: auto; right: auto;
+    top: 16px; left: 16px;
+    background: #2a5bb3;
+  }
+  .trigger.in-iframe:hover { background: #336ccc; }
   .trigger .dot {
     width: 8px; height: 8px; border-radius: 4px; background: #666; flex-shrink: 0;
   }
@@ -265,10 +274,19 @@ if (window.__chorusLoaded) {
 } else {
   window.__chorusLoaded = true;
   try {
-    if (window !== window.top) {
+    const inIframe = window !== window.top;
+    // Opt-in override: some embeds want the FULL chorus UI inside an iframe
+    // (e.g. the chorus-on-chorus test-site wants to visually demonstrate UI
+    // changes to the tool itself, which silent preview mode would hide).
+    const scriptEl =
+      document.getElementById('chorus') ||
+      document.querySelector('script[data-preview-mode]') ||
+      document.querySelector('script[data-github-client-id]');
+    const forceFull = scriptEl?.dataset?.previewMode === 'full';
+    if (inIframe && !forceFull) {
       bootPreviewMode();
     } else {
-      boot();
+      boot({ inIframe });
     }
   } catch (err) {
     console.error('[chorus] boot failed:', err);
@@ -383,7 +401,7 @@ function cssPath(el) {
 // ───────────────────────────────────────────────────────────────────
 // Full app boot
 // ───────────────────────────────────────────────────────────────────
-function boot() {
+function boot({ inIframe = false } = {}) {
   const script =
     document.getElementById('chorus') ||
     document.getElementById('oss-kanban-widget') ||
@@ -476,7 +494,7 @@ function boot() {
   root.appendChild(styleEl);
 
   const trigger = document.createElement('button');
-  trigger.className = 'trigger';
+  trigger.className = 'trigger' + (inIframe ? ' in-iframe' : '');
   trigger.addEventListener('click', () => {
     state.open ? closePanel() : openPanel();
   });
