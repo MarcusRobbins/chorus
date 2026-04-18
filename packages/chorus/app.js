@@ -108,12 +108,16 @@ const CSS_TEXT = `
     background: #fafafa;
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
   }
-  .action-bar .secondary { display: flex; gap: 10px; }
+  .action-bar .secondary { display: flex; gap: 6px; flex-wrap: wrap; }
   .action-bar .secondary button {
-    background: transparent; border: none; color: #0366d6;
-    font-size: 12px; cursor: pointer; padding: 4px;
+    background: #fff; border: 1px solid #ddd; color: #333;
+    font: inherit; font-size: 12px; cursor: pointer;
+    padding: 5px 10px; border-radius: 5px;
+    transition: background .12s ease, border-color .12s ease;
   }
-  .action-bar .secondary button:hover { text-decoration: underline; }
+  .action-bar .secondary button:hover {
+    background: #f4f4f4; border-color: #bbb;
+  }
   .action-bar .primary {
     font: inherit; font-size: 13px; font-weight: 500;
     padding: 8px 16px; border-radius: 6px; cursor: pointer;
@@ -1238,14 +1242,18 @@ function boot({ inIframe = false } = {}) {
     }
     const hasDraft = (s.followUpDraft || '').trim().length > 0;
     const showing = preview.isShowing();
+    // When there's text in "Refine — what next?", the primary action is to
+    // send that to the AI. When there isn't, the user is done — the primary
+    // is "Open the feature branch" (where they can merge / discuss).
+    const primary = hasDraft
+      ? `<button class="primary" data-action="ai-continue">Send refinement</button>`
+      : `<button class="primary green" data-action="ai-done">Done — view branch</button>`;
     return `
       <div class="secondary">
         <button data-action="pick">${state.pickMode ? 'Cancel pick' : 'Pick element'}</button>
-        ${state.capture ? `<button data-action="clear-capture">Clear</button>` : ''}
-        <button data-action="${showing ? 'hide-preview' : 'show-preview'}">${showing ? 'Hide preview' : 'Show preview'}</button>
-        <button data-action="open-in-new-tab">Open in new tab</button>
+        <button data-action="${showing ? 'hide-preview' : 'show-preview'}">${showing ? 'Hide' : 'Show'} preview</button>
       </div>
-      <button class="primary" data-action="ai-continue" ${hasDraft ? '' : 'disabled'}>Continue</button>
+      ${primary}
     `;
   }
 
@@ -1418,14 +1426,31 @@ function boot({ inIframe = false } = {}) {
     // AI
     const fu = panelEl.querySelector('[data-field="followup"]');
     fu?.addEventListener('input', (e) => {
+      const prev = (state.ai?.followUpDraft || '').trim().length > 0;
+      const now = e.target.value.trim().length > 0;
       if (state.ai) state.ai.followUpDraft = e.target.value;
-      const btn = panelEl.querySelector('[data-action="ai-continue"]');
-      if (btn) btn.disabled = !e.target.value.trim();
+      // Swap the primary button (Send refinement ↔ Done — view branch) only
+      // on the draft → empty / empty → draft transitions. Avoids re-rendering
+      // the whole panel on every keystroke, which would steal focus from the
+      // textarea.
+      if (prev !== now) {
+        const bar = panelEl.querySelector('.action-bar');
+        if (bar) {
+          renderPanel(); // full re-render is simplest; caret preserved below
+          const again = panelEl.querySelector('[data-field="followup"]');
+          if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+        }
+      }
     });
     on('[data-action="ai-continue"]', 'click', continueAi);
     on('[data-action="ai-cancel"]', 'click', () => aiAbortController?.abort());
-    on('[data-action="open-in-new-tab"]', 'click', () => {
-      if (state.ai?.previewUrl) window.open(state.ai.previewUrl, '_blank', 'noopener');
+    on('[data-action="ai-done"]', 'click', () => {
+      if (state.ai?.branch) {
+        loadFeature(state.ai.branch);
+        navigate('feature');
+      } else {
+        goBack();
+      }
     });
 
     // Sign-in
