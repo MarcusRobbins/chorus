@@ -1814,7 +1814,7 @@ function boot({ inIframe = false } = {}) {
     aiAbortController = new AbortController();
     try {
       const captureSuffix = state.capture
-        ? '\n\nAnnotated element on the preview:\n' + JSON.stringify(state.capture, null, 2)
+        ? '\n\n' + captureHint(state.capture)
         : '';
       const followUpWithCapture = followUp + captureSuffix;
       const hasHistory = Array.isArray(state.ai.messages) && state.ai.messages.length > 0;
@@ -1898,6 +1898,31 @@ function boot({ inIframe = false } = {}) {
     log('ai', ev);
   }
 
+  // Build an explicit hint block when the user annotated an element that
+  // turned out to be INSIDE a shadow root. The selector we captured contains
+  // a `::shadow` marker in that case. Shadow-DOM elements aren't in HTML —
+  // they come from JS that imperatively renders into a shadow root (widgets,
+  // web components, embedded tools). The most reliable way for the AI to
+  // find them is to grep the repo's JS for the visible text snippet, not
+  // chase the selector.
+  function captureHint(capture) {
+    if (!capture) return 'No element annotation.';
+    const inShadow = typeof capture.selector === 'string' && capture.selector.includes('::shadow');
+    const text = (capture.text || '').trim();
+    const base = `Annotated element: ${JSON.stringify(capture, null, 2)}`;
+    if (!inShadow) return base;
+    return [
+      base,
+      '',
+      'IMPORTANT: this element is inside a Web Component shadow root (note the ::shadow segment in the selector). It is NOT in a static HTML file.',
+      'It is rendered by JavaScript that attaches a shadow root and writes template strings or DOM into it — commonly a widget or tool bundled into the page.',
+      text
+        ? `To locate the source: list_files, then read the JS files (including any under packages/, widget/, vendor/, etc.) and grep for the literal visible text ${JSON.stringify(text)}. That is almost always a string inside a template literal, innerHTML assignment, or createElement chain inside a .js/.mjs/.ts file.`
+        : 'To locate the source: read the JS files that attach shadow roots and find the element by its tag/class from the selector.',
+      'Do NOT satisfy this ticket by editing top-level HTML/CSS unless you have confirmed the element actually lives there — shadow roots are isolated from outer CSS.',
+    ].join('\n');
+  }
+
   function buildFirstTurnPrompt(issue, description, capture, defaultBranch) {
     return [
       `Feature: ${state.name}`,
@@ -1906,7 +1931,7 @@ function boot({ inIframe = false } = {}) {
       `Issue number: ${issue.number}`,
       `Working branch: feature/${slugify(state.name)}`,
       `Repo default branch: ${defaultBranch}`,
-      capture ? `Annotated element: ${JSON.stringify(capture, null, 2)}` : 'No element annotation.',
+      captureHint(capture),
       '',
       'Use list_files first to see what is in the repo. Read relevant files, then stage changes with write_file, then call finish.',
     ].join('\n');
