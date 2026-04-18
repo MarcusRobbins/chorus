@@ -534,7 +534,13 @@ function boot({ inIframe = false } = {}) {
   host.id = 'chorus-host';
   host.style.cssText = 'all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;';
   document.body.appendChild(host);
-  const root = host.attachShadow({ mode: 'closed' });
+  // mode: 'open' — the outer picker (running inside a preview iframe for
+  // chorus-on-chorus) relies on composedPath() piercing the shadow boundary
+  // so it can highlight and select elements INSIDE the chorus UI itself.
+  // Closed shadow roots truncate composedPath at the host from outside, which
+  // made the picker stop at #chorus-host. Chorus doesn't store any secrets
+  // in the shadow tree, so opening it up has no real cost.
+  const root = host.attachShadow({ mode: 'open' });
   const styleEl = document.createElement('style');
   styleEl.textContent = CSS_TEXT;
   root.appendChild(styleEl);
