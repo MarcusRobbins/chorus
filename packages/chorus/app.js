@@ -356,8 +356,18 @@ function bootPreviewMode() {
       try { window.parent.postMessage({ type: 'chorus:preview:cancelled' }, '*'); } catch {}
     }
   }
+  // composedPath() returns the real event target even across shadow roots.
+  // Without it, events inside a closed/open shadow tree retarget to the host
+  // element — so the picker can't see elements inside e.g. the inner chorus's
+  // shadow-root UI.
+  function realTarget(e) {
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    return path[0] instanceof Element ? path[0] : e.target;
+  }
   function onHover(e) {
-    const r = e.target.getBoundingClientRect();
+    const target = realTarget(e);
+    if (!(target instanceof Element)) return;
+    const r = target.getBoundingClientRect();
     overlay.style.display = 'block';
     overlay.style.left = r.left + 'px';
     overlay.style.top = r.top + 'px';
@@ -366,7 +376,9 @@ function bootPreviewMode() {
   }
   function onClick(e) {
     e.preventDefault(); e.stopPropagation();
-    const el = e.target; const r = el.getBoundingClientRect();
+    const el = realTarget(e);
+    if (!(el instanceof Element)) return;
+    const r = el.getBoundingClientRect();
     const capture = {
       tag: el.tagName.toLowerCase(),
       selector: cssPath(el),
@@ -385,6 +397,12 @@ function cssPath(el) {
   if (el.id) return '#' + CSS.escape(el.id);
   const parts = [];
   let cur = el;
+  // Walk up through normal DOM *and* through shadow boundaries. When we hit
+  // the top of a shadow tree (parentElement is null but parentNode is a
+  // ShadowRoot), hop to the shadow host and continue. We insert a `::shadow`
+  // marker so the consumer (and the AI) can tell the element is inside a
+  // shadow root — useful context when the target is part of a web-component
+  // or a widget that uses shadow DOM for style isolation (like chorus itself).
   while (cur && cur.nodeType === 1 && cur.tagName !== 'BODY' && cur.tagName !== 'HTML') {
     let seg = cur.tagName.toLowerCase();
     const parent = cur.parentElement;
@@ -394,7 +412,15 @@ function cssPath(el) {
     }
     parts.unshift(seg);
     if (parent && parent.id) { parts.unshift('#' + CSS.escape(parent.id)); break; }
-    cur = parent;
+    if (parent) { cur = parent; continue; }
+    // No parentElement — might be at the root of a shadow tree. Cross over.
+    const root = cur.getRootNode?.();
+    if (root && root.host instanceof Element) {
+      parts.unshift('::shadow');
+      cur = root.host;
+      continue;
+    }
+    break;
   }
   return parts.join(' > ');
 }
