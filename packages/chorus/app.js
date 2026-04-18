@@ -1871,9 +1871,10 @@ function boot({ inIframe = false } = {}) {
   fetchBranches();
 
   // Auto-open the preview iframe on boot (opt-in via data-auto-preview="true").
-  // This makes the chorus-on-chorus test-site always show both pills — outer
-  // (stable, from the main branch) and inner (current branch being viewed).
-  if (AUTO_PREVIEW) {
+  // Gated on !inIframe so the chorus running inside the preview iframe
+  // doesn't recursively open another iframe — which would open another, etc.
+  // Only the top-level chorus auto-previews.
+  if (AUTO_PREVIEW && !inIframe) {
     showPreviewFrame(previewUrlFor(state.currentBranch));
   }
 
