@@ -117,10 +117,134 @@ if (window.__ossKanbanWidgetLoaded) {
 } else {
   window.__ossKanbanWidgetLoaded = true;
   try {
-    boot();
+    // If we're inside an iframe (i.e. loaded as part of a branch preview),
+    // run a slim "preview mode" instead of the full widget UI. The outer
+    // widget on the parent page has the FAB, panel, auth, and state; we
+    // just listen for pick commands from it and report element captures +
+    // our current location back via postMessage.
+    if (window !== window.top) {
+      bootPreviewMode();
+    } else {
+      boot();
+    }
   } catch (err) {
     console.error('[kanban] boot failed:', err);
   }
+}
+
+// ----- Preview mode (runs in iframes) ---------------------------------------
+function bootPreviewMode() {
+  // Announce location to parent now and whenever it changes.
+  const postLocation = () => {
+    try {
+      window.parent.postMessage({
+        type: 'chorus:preview:location',
+        href: location.href,
+        path: (location.pathname || '') + (location.search || '') + (location.hash || ''),
+      }, '*');
+    } catch {}
+  };
+  postLocation();
+  window.addEventListener('hashchange', postLocation);
+  window.addEventListener('popstate', postLocation);
+
+  let picking = false;
+  let overlay = null;
+  let hint = null;
+
+  window.addEventListener('message', (e) => {
+    // Only accept messages from our parent window (not from other iframes
+    // that might somehow postMessage us).
+    if (e.source !== window.parent) return;
+    const data = e.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'chorus:parent:start-pick') startPick();
+    if (data.type === 'chorus:parent:cancel-pick') cancelPick();
+  });
+
+  function startPick() {
+    if (picking) return;
+    picking = true;
+    overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:fixed; pointer-events:none; border:2px solid #c33; ' +
+      'background:rgba(204,51,51,0.08); z-index:2147483645; ' +
+      'transition:all 0.05s linear; display:none;';
+    document.body.appendChild(overlay);
+    hint = document.createElement('div');
+    hint.style.cssText =
+      'position:fixed; top:16px; left:50%; transform:translateX(-50%); ' +
+      'background:#111; color:white; padding:6px 12px; border-radius:4px; ' +
+      'font-size:12px; pointer-events:none; z-index:2147483645; ' +
+      'font-family:system-ui,sans-serif;';
+    hint.textContent = 'Click any element · Esc to cancel';
+    document.body.appendChild(hint);
+    document.addEventListener('mousemove', onHover, true);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKey, true);
+  }
+
+  function cancelPick(notify = true) {
+    if (!picking) return;
+    picking = false;
+    overlay?.remove(); overlay = null;
+    hint?.remove(); hint = null;
+    document.removeEventListener('mousemove', onHover, true);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    if (notify) {
+      try { window.parent.postMessage({ type: 'chorus:preview:cancelled' }, '*'); } catch {}
+    }
+  }
+
+  function onHover(e) {
+    const r = e.target.getBoundingClientRect();
+    overlay.style.display = 'block';
+    overlay.style.left = r.left + 'px';
+    overlay.style.top = r.top + 'px';
+    overlay.style.width = r.width + 'px';
+    overlay.style.height = r.height + 'px';
+  }
+
+  function onClick(e) {
+    e.preventDefault(); e.stopPropagation();
+    const el = e.target;
+    const r = el.getBoundingClientRect();
+    const capture = {
+      tag: el.tagName.toLowerCase(),
+      selector: previewCssPath(el),
+      text: (el.innerText || '').trim().slice(0, 200),
+      rect: { x: r.left, y: r.top, w: r.width, h: r.height },
+      url: location.href,
+    };
+    try {
+      window.parent.postMessage({ type: 'chorus:preview:capture', capture }, '*');
+    } catch {}
+    cancelPick(false);
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') cancelPick();
+  }
+}
+
+function previewCssPath(el) {
+  if (!(el instanceof Element)) return '';
+  if (el.id) return '#' + CSS.escape(el.id);
+  const parts = [];
+  let cur = el;
+  while (cur && cur.nodeType === 1 && cur.tagName !== 'BODY' && cur.tagName !== 'HTML') {
+    let seg = cur.tagName.toLowerCase();
+    const parent = cur.parentElement;
+    if (parent) {
+      const sameTag = [...parent.children].filter((c) => c.tagName === cur.tagName);
+      if (sameTag.length > 1) seg += `:nth-of-type(${sameTag.indexOf(cur) + 1})`;
+    }
+    parts.unshift(seg);
+    if (parent && parent.id) { parts.unshift('#' + CSS.escape(parent.id)); break; }
+    cur = parent;
+  }
+  return parts.join(' > ');
 }
 
 function boot() {
@@ -539,6 +663,28 @@ function boot() {
 
   function enterPickMode() {
     if (state.pickMode) return;
+    // If a preview iframe is showing, picking means "pick inside that branch's
+    // rendered page" — the iframe's widget is in preview mode and listens for
+    // our command. Delegate via postMessage.
+    if (preview.isShowing()) {
+      const iframe = document.getElementById('oss-kanban-preview-iframe');
+      if (iframe?.contentWindow) {
+        state.pickMode = true;
+        fab.classList.add('active');
+        fab.textContent = '×';
+        closePanel();
+        try {
+          iframe.contentWindow.postMessage({ type: 'chorus:parent:start-pick' }, '*');
+        } catch (err) {
+          state.pickMode = false;
+          fab.classList.remove('active');
+          fab.textContent = '+';
+          log('failed to postMessage to preview iframe', err);
+        }
+        return;
+      }
+    }
+    // Otherwise: pick on our own document.
     state.pickMode = true;
     fab.classList.add('active');
     fab.textContent = '×';
@@ -558,6 +704,13 @@ function boot() {
 
   function exitPickMode() {
     if (!state.pickMode) return;
+    // If we delegated picking to the preview iframe, cancel it there too.
+    const iframe = document.getElementById('oss-kanban-preview-iframe');
+    if (iframe?.contentWindow && preview.isShowing()) {
+      try {
+        iframe.contentWindow.postMessage({ type: 'chorus:parent:cancel-pick' }, '*');
+      } catch {}
+    }
     state.pickMode = false;
     fab.classList.remove('active');
     fab.textContent = '+';
@@ -773,6 +926,37 @@ function boot() {
   // Re-render the panel whenever preview visibility changes anywhere on the page.
   window.addEventListener('oss-kanban:preview:change', () => {
     if (state.panelOpen) renderPanel();
+  });
+
+  // Messages from widgets running inside preview iframes.
+  window.addEventListener('message', (e) => {
+    // Only trust messages from our preview iframe.
+    const iframe = document.getElementById('oss-kanban-preview-iframe');
+    if (!iframe || e.source !== iframe.contentWindow) return;
+    const data = e.data;
+    if (!data || typeof data !== 'object') return;
+
+    if (data.type === 'chorus:preview:location') {
+      // Re-dispatch as a CustomEvent so the switcher (and anyone else) can
+      // update their tracked "current path" without tight coupling.
+      window.dispatchEvent(new CustomEvent('chorus:preview:location', { detail: data }));
+    }
+
+    if (data.type === 'chorus:preview:capture') {
+      state.capture = data.capture || null;
+      state.pickMode = false;
+      fab.classList.remove('active');
+      fab.textContent = '+';
+      openPanel();
+      log('capture from preview', data.capture);
+    }
+
+    if (data.type === 'chorus:preview:cancelled') {
+      state.pickMode = false;
+      fab.classList.remove('active');
+      fab.textContent = '+';
+      openPanel();
+    }
   });
 
   // Switcher can hand us a branch + its tracking issue via this event; we open

@@ -954,6 +954,20 @@ function boot() {
   window.addEventListener('hashchange', onHostNav);
   window.addEventListener('popstate', onHostNav);
 
+  // The widget inside the preview iframe reports its location as the user
+  // navigates around. Use it to keep the tracked path in sync so branch-
+  // switching preserves where they are.
+  window.addEventListener('chorus:preview:location', (e) => {
+    const path = e.detail?.path;
+    if (!path) return;
+    // Don't fire a preview reload on path change that came FROM the preview —
+    // would just cause the iframe to reload to the same place.
+    if (path !== state.currentPath) {
+      state.currentPath = path;
+      if (state.open) renderPanel();
+    }
+  });
+
   renderTrigger();
 
   if (DEBUG) {
