@@ -451,7 +451,7 @@ function boot({ inIframe = false } = {}) {
 
     // Context
     currentBranch: 'main',
-    currentPath: 'index.html' + (location.search || '') + (location.hash || ''),
+    currentPath: initialSitePath(),
 
     // Browse
     branches: [],
@@ -745,6 +745,24 @@ function boot({ inIframe = false } = {}) {
     // can always hit "Hide preview" if they don't want it.
     preview.show(previewUrlFor(name));
     navigate('feature');
+  }
+
+  // Figure out the site-relative path from the host page's URL.
+  // On GitHub Pages, URLs look like /<repo>/<rest-of-path>/. We strip the
+  // /<repo>/ prefix so `rest-of-path` is the "within the repo" location.
+  // E.g. for `marcusrobbins.github.io/chorus/test-site/` we return
+  // `test-site/index.html` — which is what raw.githack needs to serve.
+  function initialSitePath() {
+    let rest;
+    const prefix = '/' + REPONAME + '/';
+    if (location.pathname.startsWith(prefix)) {
+      rest = location.pathname.slice(prefix.length);
+    } else {
+      rest = location.pathname.replace(/^\/+/, '');
+    }
+    // Directory URLs (ending in /) need an explicit index.html for raw.githack
+    if (!rest || rest.endsWith('/')) rest = (rest || '') + 'index.html';
+    return rest + (location.search || '') + (location.hash || '');
   }
 
   function previewUrlFor(branchName, path = state.currentPath) {
