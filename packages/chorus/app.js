@@ -730,9 +730,20 @@ function boot() {
   }
 
   function previewUrlFor(branchName, path = state.currentPath) {
-    const cleanPath = String(path || 'index.html').replace(/^\/+/, '');
-    const sep = cleanPath.includes('?') ? '&' : '?';
-    return `https://raw.githack.com/${OWNER}/${REPONAME}/${encodeURIComponent(branchName)}/${cleanPath}${sep}t=${Date.now().toString(36)}`;
+    let cleanPath = String(path || 'index.html').replace(/^\/+/, '');
+    // Defensive: if currentPath somehow got a raw.githack prefix baked in
+    // (e.g. from an old session), re-strip it before building the URL so we
+    // don't end up with /owner/repo/branch/owner/repo/branch/… nesting.
+    cleanPath = cleanPath.replace(new RegExp(`^${OWNER}/${REPONAME}/[^?#]+?/`), '');
+    // Strip any leftover t= cache-buster from the path's query
+    const qIdx = cleanPath.indexOf('?');
+    let pathPart = qIdx >= 0 ? cleanPath.slice(0, qIdx) : cleanPath;
+    let queryPart = qIdx >= 0 ? cleanPath.slice(qIdx + 1) : '';
+    const sp = new URLSearchParams(queryPart);
+    sp.delete('t');
+    const rebuiltQuery = sp.toString();
+    const sep = rebuiltQuery ? '&' : '?';
+    return `https://raw.githack.com/${OWNER}/${REPONAME}/${encodeURIComponent(branchName)}/${pathPart}${rebuiltQuery ? '?' + rebuiltQuery : ''}${sep}t=${Date.now().toString(36)}`;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -1738,13 +1749,53 @@ function boot() {
   window.addEventListener('oss-kanban:auth:change', () => {
     if (state.open) renderPanel();
   });
+  // Preview-mode inside an iframe reports the iframe's own location. That
+  // location is a raw.githack URL containing the owner/repo/branch prefix —
+  // we only want the SITE-relative portion (e.g. `/about` or `index.html`).
   window.addEventListener('chorus:preview:location', (e) => {
-    const path = e.detail?.path; if (!path) return;
-    if (path !== state.currentPath) {
-      state.currentPath = path;
+    const href = e.detail?.href; if (!href) return;
+    const sitePath = sitePathFromRawGithack(href);
+    if (sitePath == null) return;
+    if (sitePath !== state.currentPath) {
+      state.currentPath = sitePath;
       if (state.open) renderPanel();
     }
   });
+
+  // Given a full raw.githack URL, return just the site-relative path+query+hash.
+  // Strips the /owner/repo/branch/ prefix and any `t=` cache-buster we added.
+  function sitePathFromRawGithack(href) {
+    try {
+      const url = new URL(href);
+      if (!url.hostname.endsWith('githack.com')) return null;
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts.length < 3) return null;
+
+      // Match branch against state.currentBranch / featureBranch if we can —
+      // branches can contain slashes (feature/testy), so a naive "drop first
+      // 3 segments" would fail for multi-segment branch names.
+      const known = state.currentBranch || state.featureBranch;
+      let consumed;
+      if (known) {
+        const knownSegs = known.split('/');
+        const match = knownSegs.every((s, i) => parts[2 + i] === s);
+        consumed = 2 + (match ? knownSegs.length : 1);
+      } else {
+        consumed = 3; // best-effort: owner + repo + first branch segment
+      }
+      const sitePathSegs = parts.slice(consumed);
+      let sitePath = sitePathSegs.join('/') || 'index.html';
+
+      // Drop our own cache-buster; keep everything else a real site might use.
+      const search = new URLSearchParams(url.search);
+      search.delete('t');
+      const searchStr = search.toString();
+      sitePath += (searchStr ? '?' + searchStr : '') + (url.hash || '');
+      return sitePath;
+    } catch {
+      return null;
+    }
+  }
 
   // Messages from widgets inside preview iframes
   window.addEventListener('message', (e) => {
