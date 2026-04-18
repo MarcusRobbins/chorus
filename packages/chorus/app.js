@@ -501,6 +501,11 @@ function boot({ inIframe = false } = {}) {
   // case (chorus-on-chorus) opens the iframe in "windowed" mode. Other
   // chorus embeds leave it at full-viewport.
   function showPreviewFrame(url) {
+    if (DEBUG) {
+      // Trace who called us so we can diagnose runaway loops.
+      console.log('[chorus] showPreviewFrame →', url);
+      console.trace('[chorus] caller');
+    }
     preview.show(url, { windowed: IS_META });
   }
 
