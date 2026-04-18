@@ -546,6 +546,12 @@ function boot() {
     const header = turns === 0
       ? `<div class="ok">Refining <code>${esc(s.branch)}</code></div>`
       : `<div class="ok">Branch <code>${esc(s.branch)}</code> · turn ${turns}</div>`;
+    const capture = state.capture;
+    const captureClass = capture ? 'capture' : 'capture empty';
+    const captureText = capture
+      ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
+      : 'nothing selected';
+
     return `
       ${header}
       ${s.summary ? `<div class="muted-s">${esc(s.summary)}</div>` : ''}
@@ -554,8 +560,14 @@ function boot() {
         Refine — what should the AI change next?
         <textarea data-field="followup" placeholder="e.g. make the heading bolder · add a subheading · revert the colour">${esc(s.followUpDraft || '')}</textarea>
       </label>
+      <div>
+        <div class="muted-s">Selected element${capture ? ' (will be included as context)' : ''}</div>
+        <div class="${captureClass}">${esc(captureText)}</div>
+      </div>
       <div class="row">
         <div class="row-r">
+          <button data-action="pick">Pick element</button>
+          ${capture ? `<button data-action="clear-capture">Clear</button>` : ''}
           <button data-action="ai-reset">New ticket</button>
           <button data-action="ai-open-newtab">New tab</button>
           ${previewing
@@ -608,6 +620,7 @@ function boot() {
     on('[data-action="cancel-auth"]', 'click', cancelDeviceFlow);
     on('[data-action="pick"]',        'click', enterPickMode);
     on('[data-action="submit"]',      'click', submitTicket);
+    on('[data-action="clear-capture"]', 'click', () => { state.capture = null; renderPanel(); });
 
     on('[data-action="ai-start"]',         'click', startAi);
     on('[data-action="file-another"]',     'click', fileAnother);
@@ -1103,13 +1116,20 @@ function boot() {
 
     aiAbortController = new AbortController();
     try {
+      // Include the element capture (if any) with the follow-up so the AI
+      // knows which element the user cares about on this turn.
+      const captureSuffix = state.capture
+        ? '\n\nAnnotated element on the preview:\n' + JSON.stringify(state.capture, null, 2)
+        : '';
+      const followUpWithCapture = followUp + captureSuffix;
+
       // If we have no prior conversation (e.g. Refine kicked off from the
       // switcher against a persisted branch), start a fresh session but
       // target the existing branch instead of creating a new one.
       const hasHistory = Array.isArray(state.ai.messages) && state.ai.messages.length > 0;
       const runArgs = hasHistory
-        ? { priorMessages: state.ai.messages, followUp }
-        : { userPrompt: buildRefinePrompt(state.ai.branch, followUp) };
+        ? { priorMessages: state.ai.messages, followUp: followUpWithCapture }
+        : { userPrompt: buildRefinePrompt(state.ai.branch, followUpWithCapture) };
 
       const result = await runAiSession({
         apiKey: state.openaiKey,
@@ -1121,6 +1141,9 @@ function boot() {
       });
       await commitAndSurface(result, state.lastIssue, /* firstTurn */ false, null);
       state.ai.followUpDraft = '';
+      // Clear the picked element so the next turn starts fresh — user can
+      // pick again if they want to scope the next change.
+      state.capture = null;
     } catch (err) {
       if (aiAbortController.signal.aborted) return aiFail('Cancelled.');
       aiFail(err.message || String(err));
