@@ -368,9 +368,23 @@ function bootPreviewMode() {
     const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
     return path[0] instanceof Element ? path[0] : e.target;
   }
+  let lastHoverLog = 0;
   function onHover(e) {
     const target = realTarget(e);
     if (!(target instanceof Element)) return;
+    // Log sparingly — once every 500ms — so we can see what the picker is
+    // actually resolving without flooding the console.
+    const now = Date.now();
+    if (now - lastHoverLog > 500) {
+      lastHoverLog = now;
+      const path = e.composedPath?.() ?? [];
+      console.log('[chorus/preview-mode] hover', {
+        evTarget: (e.target && e.target.tagName) + (e.target?.id ? '#' + e.target.id : ''),
+        path0: (path[0] && path[0].tagName) + (path[0]?.id ? '#' + path[0].id : ''),
+        pathLen: path.length,
+        resolved: target.tagName + (target.id ? '#' + target.id : ''),
+      });
+    }
     const r = target.getBoundingClientRect();
     overlay.style.display = 'block';
     overlay.style.left = r.left + 'px';
@@ -541,6 +555,7 @@ function boot({ inIframe = false } = {}) {
   // made the picker stop at #chorus-host. Chorus doesn't store any secrets
   // in the shadow tree, so opening it up has no real cost.
   const root = host.attachShadow({ mode: 'open' });
+  if (DEBUG) console.log('[chorus] shadow attached', { mode: host.shadowRoot ? 'open' : 'closed' });
   const styleEl = document.createElement('style');
   styleEl.textContent = CSS_TEXT;
   root.appendChild(styleEl);
