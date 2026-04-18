@@ -1192,7 +1192,11 @@ function boot() {
       files: state.ai.staged,
     });
 
-    const previewUrl = `https://raw.githack.com/${OWNER}/${REPONAME}/${branch}/index.html`;
+    // Include a cache-buster on the initial preview URL so the browser's HTTP
+    // cache (which honours raw.githack's max-age=300) can't serve a stale copy
+    // from before this commit. The t= value is read by the inline bootstrap
+    // loader in index.html and propagated to every downstream .tsx fetch.
+    const previewUrl = `https://raw.githack.com/${OWNER}/${REPONAME}/${branch}/index.html?t=${Date.now().toString(36)}`;
 
     await safe(() => gh.createIssueComment(
       state.token, OWNER, REPONAME, issue.number,

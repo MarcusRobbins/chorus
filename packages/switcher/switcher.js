@@ -305,7 +305,11 @@ function boot() {
 
   function previewUrlFor(branchName, path = state.currentPath) {
     const cleanPath = String(path || 'index.html').replace(/^\/+/, '');
-    return `https://raw.githack.com/${OWNER}/${REPONAME}/${encodeURIComponent(branchName)}/${cleanPath}`;
+    // Cache-buster on every preview URL so the browser's HTTP cache can't
+    // serve a stale raw.githack response (they send max-age=300). The same
+    // value flows into the iframe's bootstrap + all .tsx fetches.
+    const sep = cleanPath.includes('?') ? '&' : '?';
+    return `https://raw.githack.com/${OWNER}/${REPONAME}/${encodeURIComponent(branchName)}/${cleanPath}${sep}t=${Date.now().toString(36)}`;
   }
 
   // ----- automation install --------------------------------------------------
