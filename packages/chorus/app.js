@@ -894,7 +894,6 @@ function boot({ inIframe = false } = {}) {
     return `
       <div class="secondary">
         <button data-action="refresh-branches">Refresh</button>
-        ${preview.isShowing() ? `<button data-action="hide-preview">Hide preview</button>` : ''}
       </div>
       <button class="primary" data-action="goto-propose">✚ Suggest a change</button>
     `;
@@ -1095,10 +1094,8 @@ function boot({ inIframe = false } = {}) {
     const branch = state.featureBranch;
     const isMain = branch === 'main' || branch === 'master';
     const authed = auth.isAuthed();
-    const showing = preview.isShowing();
     return `
       <div class="secondary">
-        ${!isMain ? `<button data-action="${showing ? 'hide-preview' : 'show-preview'}">${showing ? 'Hide preview' : 'Show preview'}</button>` : ''}
         ${!isMain && authed ? `<button data-action="merge" title="Merge this branch to main">Merge</button>` : ''}
       </div>
       ${!isMain ? `<button class="primary" data-action="refine" ${authed ? '' : 'disabled title="Sign in to refine"'}>🤖 Refine with AI</button>` : `<button class="primary" data-action="goto-propose">✚ Suggest a change</button>`}
@@ -1267,7 +1264,6 @@ function boot({ inIframe = false } = {}) {
       return `<div class="secondary"></div><button class="primary" data-action="ai-cancel">Cancel</button>`;
     }
     const hasDraft = (s.followUpDraft || '').trim().length > 0;
-    const showing = preview.isShowing();
     // When there's text in "Refine — what next?", the primary action is to
     // send that to the AI. When there isn't, the user is done — the primary
     // is "Open the feature branch" (where they can merge / discuss).
@@ -1277,7 +1273,6 @@ function boot({ inIframe = false } = {}) {
     return `
       <div class="secondary">
         <button data-action="pick">${state.pickMode ? 'Cancel pick' : 'Pick element'}</button>
-        <button data-action="${showing ? 'hide-preview' : 'show-preview'}">${showing ? 'Hide' : 'Show'} preview</button>
       </div>
       ${primary}
     `;
@@ -1388,13 +1383,6 @@ function boot({ inIframe = false } = {}) {
       el.addEventListener('click', () => selectBranch(el.dataset.branch));
     });
     on('[data-action="refresh-branches"]', 'click', fetchBranches);
-    on('[data-action="hide-preview"]', 'click', () => { preview.hide(); renderPanel(); });
-    on('[data-action="show-preview"]', 'click', () => {
-      if (state.featureBranch) {
-        showBranchPreview(state.featureBranch);
-        renderPanel();
-      }
-    });
     on('[data-action="goto-propose"]', 'click', () => {
       if (!requireAuth('propose')) return;
       navigate('propose');
