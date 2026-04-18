@@ -20,7 +20,8 @@ Rules:
 - If the repo is empty, create a minimal index.html that satisfies the request.
 - Do not install dependencies. Do not introduce a build step.
 - Keep changes focused. Do not refactor unrelated code.
-- Do not call finish until you have staged at least one write_file, unless truly nothing needs to change.`;
+- Do not call finish until you have staged at least one write_file, unless truly nothing needs to change.
+- CRITICAL: write_file replaces the entire file contents with what you send. When editing an existing file you MUST include the complete original contents plus your change — do NOT summarise, abbreviate, or omit sections. If the file is long, that's fine; send every line. A staged file that is shorter than the original is almost always a bug.`;
 
 export const TOOLS = [
   {

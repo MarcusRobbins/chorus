@@ -57,7 +57,8 @@
       ch.setAttribute('data-github-client-id', 'Ov23lijbc9rZ5Vi9o9F2');
       ch.setAttribute('data-github-repo', 'MarcusRobbins/chorus');
       ch.setAttribute('data-github-auth-proxy', 'https://chorus-auth-proxy.marcusrobbins58.workers.dev');
-      ch.setAttribute('data-openai-model', 'gpt-4o');
+      // Leaving data-openai-model unset lets chorus use its own default
+      // (currently gpt-5.4). Users can override in Settings → Model.
       ch.setAttribute('data-preview-mode', 'full');
       ch.setAttribute('data-auto-preview', 'true');
       ch.setAttribute('data-debug', 'true');

@@ -455,7 +455,21 @@ function boot({ inIframe = false } = {}) {
   const CLIENT_ID = script?.dataset?.githubClientId || '';
   const REPO = script?.dataset?.githubRepo || '';
   const AUTH_PROXY = script?.dataset?.githubAuthProxy || '';
-  const DEFAULT_MODEL = script?.dataset?.openaiModel || 'gpt-4o';
+  const DEFAULT_MODEL = script?.dataset?.openaiModel || 'gpt-5.4';
+  // Curated shortlist for the Settings dropdown. The freeform "Custom…" option
+  // lets users type any model string (OpenAI adds them faster than we can
+  // update this list). Order = newest → oldest-but-still-useful.
+  const MODEL_OPTIONS = [
+    'gpt-5.4',
+    'gpt-5',
+    'gpt-5-mini',
+    'gpt-4.1',
+    'gpt-4o',
+    'gpt-4o-mini',
+    'o3',
+    'o3-mini',
+    'o4-mini',
+  ];
   const DEBUG = script?.dataset?.debug === 'true';
   // Boot-entry trace so we can tell from the console whether it's the outer
   // (top-level) or inner (iframe) chorus that's reloading repeatedly.
@@ -489,6 +503,7 @@ function boot({ inIframe = false } = {}) {
   const savedToken = storeLoad('token');
   const savedUser = storeLoad('user');
   const savedOpenAIKey = storeLoad('openaiKey');
+  const savedModel = storeLoad('openaiModel');
 
   // ── State ──────────────────────────────────────────────────────
   const state = {
@@ -508,6 +523,7 @@ function boot({ inIframe = false } = {}) {
 
     // OpenAI
     openaiKey: savedOpenAIKey,
+    openaiModel: savedModel || DEFAULT_MODEL,
 
     // Context
     currentBranch: 'main',
@@ -1178,7 +1194,9 @@ function boot({ inIframe = false } = {}) {
     const captureText = capture
       ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
       : 'nothing selected';
+    const modelInUse = state.openaiModel || DEFAULT_MODEL;
     return `
+      <div class="muted-s">Model: <code>${esc(modelInUse)}</code> · <button style="background:transparent;border:none;color:#0366d6;cursor:pointer;padding:0;font-size:11px;" data-action="goto-settings">change</button></div>
       ${s.summary ? `<div class="ok"><strong>Last turn:</strong> ${esc(s.summary)}</div>` : ''}
       ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}
       ${s.events?.length ? `<div class="log">${s.events.map(renderAiEvent).join('')}${s.status === 'committing' ? '<div class="log-line muted">⏳ committing…</div>' : ''}</div>` : ''}
@@ -1284,6 +1302,9 @@ function boot({ inIframe = false } = {}) {
   // SCREEN: Settings
   // ═══════════════════════════════════════════════════════════════
   function settingsHtml() {
+    const currentModel = state.openaiModel || DEFAULT_MODEL;
+    const isCustom = !MODEL_OPTIONS.includes(currentModel);
+    const selectValue = isCustom ? '__custom__' : currentModel;
     return `
       ${whoHtml()}
       <div>
@@ -1293,7 +1314,21 @@ function boot({ inIframe = false } = {}) {
           ${state.openaiKey ? `<button data-action="clear-key" style="background:transparent; border:none; color:#a00; cursor:pointer; font-size:12px;">Clear</button>` : ''}
         </div>
       </div>
-      <p class="muted-s">Both credentials clear when you close this tab.</p>
+      <label class="field">
+        Model
+        <select data-field="model">
+          ${MODEL_OPTIONS.map((m) => `<option value="${esc(m)}" ${m === selectValue ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+          <option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Custom…</option>
+        </select>
+      </label>
+      ${isCustom || selectValue === '__custom__' ? `
+        <label class="field" style="margin-top:-4px;">
+          <span class="muted-s">Custom model string</span>
+          <input data-field="model-custom" type="text" placeholder="e.g. gpt-5.4-turbo" value="${esc(currentModel)}" />
+        </label>
+      ` : ''}
+      <p class="muted-s">Default is <code>${esc(DEFAULT_MODEL)}</code>. Unknown models will 404 at OpenAI.</p>
+      <p class="muted-s">All credentials clear when you close this tab.</p>
     `;
   }
   function settingsActions() {
@@ -1413,6 +1448,29 @@ function boot({ inIframe = false } = {}) {
     // Settings
     on('[data-action="sign-out"]', 'click', signOut);
     on('[data-action="clear-key"]', 'click', () => { state.openaiKey = null; storeClear('openaiKey'); renderPanel(); });
+    // Model selector: dropdown picks from the shortlist OR switches to the
+    // custom-text input. The custom input is debounced-saved on every
+    // keystroke so there's nothing to "confirm".
+    const modelSelect = panelEl.querySelector('[data-field="model"]');
+    modelSelect?.addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (v === '__custom__') {
+        // Re-render so the custom-string input appears; keep current value.
+        renderPanel();
+        panelEl?.querySelector('[data-field="model-custom"]')?.focus();
+      } else {
+        state.openaiModel = v;
+        storeSave('openaiModel', v);
+        renderPanel();
+      }
+    });
+    const modelCustom = panelEl.querySelector('[data-field="model-custom"]');
+    modelCustom?.addEventListener('input', (e) => {
+      const v = e.target.value.trim();
+      if (!v) return;
+      state.openaiModel = v;
+      storeSave('openaiModel', v);
+    });
 
     // Settings link in the who strip (appears on multiple screens)
     on('[data-action="goto-settings"]', 'click', () => navigate('settings'));
@@ -1692,7 +1750,7 @@ function boot({ inIframe = false } = {}) {
     const userPrompt = buildFirstTurnPrompt(issue, state.description, state.capture, defaultBranch);
     try {
       const result = await runAiSession({
-        apiKey: state.openaiKey, model: DEFAULT_MODEL,
+        apiKey: state.openaiKey, model: state.openaiModel || DEFAULT_MODEL,
         userPrompt,
         signal: aiAbortController.signal,
         onEvent: pushAiEvent,
@@ -1764,7 +1822,7 @@ function boot({ inIframe = false } = {}) {
         ? { priorMessages: state.ai.messages, followUp: followUpWithCapture }
         : { userPrompt: buildRefinePrompt(state.ai.branch, followUpWithCapture) };
       const result = await runAiSession({
-        apiKey: state.openaiKey, model: DEFAULT_MODEL,
+        apiKey: state.openaiKey, model: state.openaiModel || DEFAULT_MODEL,
         ...runArgs,
         signal: aiAbortController.signal,
         onEvent: pushAiEvent,
