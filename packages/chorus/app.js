@@ -485,11 +485,15 @@ function boot({ inIframe = false } = {}) {
       scriptSrc: script?.src,
     });
   }
-  // data-auto-preview: open a preview iframe of the current branch on boot,
-  // so the user always sees both the outer (stable) and inner (branch
-  // version) chorus instances side-by-side. Intended for the chorus-on-
-  // chorus test-site; regular embeds leave this off.
+  // data-auto-preview: open a preview iframe of the current branch on boot.
+  // Regular embeds (OSSKanban, etc.) can opt in to have the preview show
+  // immediately rather than requiring the user to click a branch.
   const AUTO_PREVIEW = script?.dataset?.autoPreview === 'true';
+  // data-chorus-meta: "this is the chorus-on-chorus demo". Forces the preview
+  // iframe to stay windowed always, so the outer and inner chorus pills don't
+  // collide at bottom-right. Independent from AUTO_PREVIEW — a site may want
+  // auto-opened previews without the always-windowed behaviour.
+  const CHORUS_META = script?.dataset?.chorusMeta === 'true';
   const SCOPES = 'public_repo workflow';
 
   const [OWNER, REPONAME] = REPO.split('/');
@@ -586,7 +590,11 @@ function boot({ inIframe = false } = {}) {
   // own bottom-right without colliding with this (outer) chorus's bottom-
   // right. The visual container IS the cue; no position or colour overrides
   // needed on the pill itself.
-  const IS_META = !inIframe && AUTO_PREVIEW;
+  // Meta mode = chorus-on-chorus demo — iframe stays windowed permanently.
+  // Decoupled from AUTO_PREVIEW so non-demo embeds that also want to auto-
+  // open the preview (e.g. OSSKanban) can still get the "full on init,
+  // shrink when panel opens" behaviour.
+  const IS_META = !inIframe && CHORUS_META;
 
   // Is the iframe currently in a "get out of the way" state?
   //  - Chorus-on-chorus (meta): always windowed. The demo relies on seeing

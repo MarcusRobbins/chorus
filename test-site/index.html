@@ -61,6 +61,10 @@
       // (currently gpt-5.4). Users can override in Settings → Model.
       ch.setAttribute('data-preview-mode', 'full');
       ch.setAttribute('data-auto-preview', 'true');
+      // data-chorus-meta: tells chorus this is the chorus-on-chorus demo, so
+      // the preview iframe stays windowed always (outer + inner pills can
+      // both show at their own bottom-right without colliding).
+      ch.setAttribute('data-chorus-meta', 'true');
       ch.setAttribute('data-debug', 'true');
       document.body.appendChild(ch);
     })();
