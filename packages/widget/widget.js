@@ -156,6 +156,28 @@ function boot() {
 
   const [OWNER, REPONAME] = REPO.split('/');
 
+  // sessionStorage persistence — scoped per repo so different projects don't
+  // collide on the same domain. Session-scoped (clears on tab close), which
+  // matches our "session-only BYOK" security posture but removes the
+  // re-login-every-reload friction.
+  const STORAGE_PREFIX = `chorus.${REPO || 'default'}.`;
+  const storeSave = (k, v) => {
+    try { sessionStorage.setItem(STORAGE_PREFIX + k, JSON.stringify(v)); } catch {}
+  };
+  const storeLoad = (k) => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_PREFIX + k);
+      return raw == null ? null : JSON.parse(raw);
+    } catch { return null; }
+  };
+  const storeClear = (k) => {
+    try { sessionStorage.removeItem(STORAGE_PREFIX + k); } catch {}
+  };
+
+  const savedToken = storeLoad('token');
+  const savedUser = storeLoad('user');
+  const savedOpenAIKey = storeLoad('openaiKey');
+
   // ============================================================
   // State
   // ============================================================
@@ -166,20 +188,24 @@ function boot() {
     description: '',
     capture: null,
 
-    auth: 'idle',           // idle | device-pending | authed | error
+    auth: savedToken ? 'authed' : 'idle',
     authError: null,
-    token: null,
-    user: null,
+    token: savedToken,
+    user: savedUser,
     deviceFlow: null,
 
     submitting: false,
     lastIssue: null,        // { html_url, number }
 
     // AI session
-    openaiKey: null,
+    openaiKey: savedOpenAIKey,
     view: 'ticket',         // ticket | ai-key | ai-running | ai-done | ai-error
     ai: null,               // { issueNumber, status, events: [], staged: Map, summary, branch, previewUrl, error }
   };
+
+  // If we have a saved token, push it into the shared auth module so the
+  // switcher picks up auth state on its own load too.
+  if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
 
   // ============================================================
   // Shadow DOM + styles
@@ -372,9 +398,12 @@ function boot() {
   function aiDoneHtml() {
     const s = state.ai;
     const previewing = preview.isShowing();
-    const turns = s.turn || 1;
+    const turns = s.turn ?? 0;
+    const header = turns === 0
+      ? `<div class="ok">Refining <code>${esc(s.branch)}</code></div>`
+      : `<div class="ok">Branch <code>${esc(s.branch)}</code> · turn ${turns}</div>`;
     return `
-      <div class="ok">Branch <code>${esc(s.branch)}</code> · turn ${turns}</div>
+      ${header}
       ${s.summary ? `<div class="muted-s">${esc(s.summary)}</div>` : ''}
       <div class="log">${(s.events || []).map(renderEvent).join('')}</div>
       <label>
@@ -632,6 +661,8 @@ function boot() {
           state.auth = 'authed';
           try { state.user = await gh.fetchUser(state.token); } catch {}
           auth.setAuth(state.token, state.user);
+          storeSave('token', state.token);
+          storeSave('user', state.user);
           renderPanel();
           return;
         }
@@ -665,6 +696,10 @@ function boot() {
     state.authError = null;
     state.lastIssue = null;
     auth.clearAuth();
+    storeClear('token');
+    storeClear('user');
+    // Don't clear openaiKey — it's a separate credential; user can clear it via
+    // a future settings UI if needed.
     renderPanel();
   }
 
@@ -719,6 +754,34 @@ function boot() {
     if (state.panelOpen) renderPanel();
   });
 
+  // Switcher can hand us a branch + its tracking issue via this event; we open
+  // the widget in "refine" mode against that branch.
+  window.addEventListener('chorus:refine', (e) => {
+    const { branch, issue } = e.detail || {};
+    if (!branch) return;
+    state.ai = {
+      issueNumber: issue?.number ?? null,
+      status: 'done',
+      events: [],
+      staged: new Map(),
+      messages: null,          // no prior conversation — we'll start fresh on this branch
+      turn: 0,                  // 0 → nothing applied in this session yet
+      summary: null,
+      branch,
+      workingRef: branch,       // tool reads default to this branch
+      previewUrl: `https://raw.githack.com/${OWNER}/${REPONAME}/${encodeURIComponent(branch)}/index.html`,
+      followUpDraft: '',
+      error: null,
+    };
+    if (issue?.number) {
+      state.lastIssue = { number: issue.number, html_url: issue.html_url };
+    }
+    state.view = 'ai-done';
+    openPanel();
+    showPreview();
+    log('refine handed in', { branch, issue: issue?.number });
+  });
+
   function startAi() {
     if (!state.openaiKey) {
       state.view = 'ai-key';
@@ -733,6 +796,7 @@ function boot() {
     const key = input?.value?.trim();
     if (!key) return;
     state.openaiKey = key;
+    storeSave('openaiKey', key);
     beginAiRun();
   }
 
@@ -803,26 +867,39 @@ function boot() {
   }
 
   async function continueAi() {
-    if (!state.ai?.branch || !state.ai.messages) return;
+    if (!state.ai?.branch) return;
     const followUp = (state.ai.followUpDraft || '').trim();
     if (!followUp) return;
+    if (!state.openaiKey) {
+      // First refine from switcher without a key stored yet — collect it.
+      state.view = 'ai-key';
+      renderPanel();
+      return;
+    }
 
     // Reset per-turn scratch state; keep conversation history + branch.
     state.ai.events = [];
     state.ai.staged = new Map();
     state.ai.status = 'running';
-    state.ai.turn = (state.ai.turn || 1) + 1;
+    state.ai.turn = (state.ai.turn || 0) + 1;
     state.ai.error = null;
     state.view = 'ai-running';
     renderPanel();
 
     aiAbortController = new AbortController();
     try {
+      // If we have no prior conversation (e.g. Refine kicked off from the
+      // switcher against a persisted branch), start a fresh session but
+      // target the existing branch instead of creating a new one.
+      const hasHistory = Array.isArray(state.ai.messages) && state.ai.messages.length > 0;
+      const runArgs = hasHistory
+        ? { priorMessages: state.ai.messages, followUp }
+        : { userPrompt: buildRefinePrompt(state.ai.branch, followUp) };
+
       const result = await runAiSession({
         apiKey: state.openaiKey,
         model: DEFAULT_MODEL,
-        priorMessages: state.ai.messages,
-        followUp,
+        ...runArgs,
         signal: aiAbortController.signal,
         onEvent: pushAiEvent,
         executeTool: (name, args) => executeTool(name, args),
@@ -833,6 +910,18 @@ function boot() {
       if (aiAbortController.signal.aborted) return aiFail('Cancelled.');
       aiFail(err.message || String(err));
     }
+  }
+
+  function buildRefinePrompt(branch, followUp) {
+    return [
+      `You are continuing work on an existing feature branch: \`${branch}\`.`,
+      '',
+      `Use list_files and read_file (they default to reading the ${branch} branch) to see the current state of the branch.`,
+      `Then apply the requested change by staging edits with write_file, and call finish when done.`,
+      '',
+      `User's request:`,
+      followUp,
+    ].join('\n');
   }
 
   async function commitAndSurface(result, issue, firstTurn, defaultBranch) {

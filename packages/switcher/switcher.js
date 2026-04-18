@@ -566,7 +566,12 @@ function boot() {
       <div class="detail-actions">
         ${previewBtn}
         ${!isMain ? `
-          <button class="primary" data-action="merge" ${canMerge ? '' : 'disabled'} title="${canMerge ? 'Merge this branch into the default branch' : 'Sign in via the widget to merge'}">
+          <button class="primary" data-action="refine" ${auth.isAuthed() ? '' : 'disabled'}
+            title="${auth.isAuthed() ? 'Continue AI work on this branch' : 'Sign in via the widget to refine'}">
+            ✨ Refine with AI
+          </button>
+          <button data-action="merge" ${canMerge ? '' : 'disabled'}
+            title="${canMerge ? 'Merge this branch into the default branch' : 'Sign in via the widget to merge'}">
             Merge to main
           </button>
         ` : ''}
@@ -683,6 +688,7 @@ function boot() {
       selectBranch(state.detailBranch);
     });
     panelEl.querySelector('[data-action="merge"]')?.addEventListener('click', mergeDetailBranch);
+    panelEl.querySelector('[data-action="refine"]')?.addEventListener('click', refineDetailBranch);
 
     // Per-issue actions
     panelEl.querySelectorAll('[data-action="vote"]').forEach((el) => {
@@ -875,6 +881,22 @@ function boot() {
   // ==================================================================
   // Merge
   // ==================================================================
+  // Hand this branch to the widget so the user can continue AI work on it.
+  // The widget listens for `chorus:refine` events and opens in refine mode.
+  function refineDetailBranch() {
+    const branch = state.detailBranch;
+    if (!branch) return;
+    // Pick the best associated issue as the "feature's tracking issue" — the
+    // first one we found via search. If none exist, we still pass just the
+    // branch; the widget handles either case.
+    const issue = state.detailIssues[0] || null;
+    window.dispatchEvent(new CustomEvent('chorus:refine', {
+      detail: { branch, issue },
+    }));
+    // Close the switcher panel so the widget takes focus.
+    closePanel();
+  }
+
   async function mergeDetailBranch() {
     const branch = state.detailBranch;
     const token = auth.getToken();
