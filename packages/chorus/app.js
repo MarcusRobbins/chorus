@@ -277,6 +277,11 @@ if (window.__chorusLoaded) {
     if (inIframe && !forceFull) {
       bootPreviewMode();
     } else {
+      // When running FULL inside an iframe (chorus-on-chorus), we still need
+      // the preview-mode picker + location reporter so the outer chorus can
+      // pick elements and track navigation in here. bootPreviewMode is inert
+      // until the parent requests picking, so it coexists with full boot.
+      if (inIframe && forceFull) bootPreviewMode();
       boot({ inIframe });
     }
   } catch (err) {
