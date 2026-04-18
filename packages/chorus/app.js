@@ -295,6 +295,10 @@ if (window.__chorusLoaded) {
 // Same logic as the previous widget's preview mode.
 // ───────────────────────────────────────────────────────────────────
 function bootPreviewMode() {
+  console.log('[chorus] bootPreviewMode ENTER', {
+    href: location.href,
+    hasParent: window.parent !== window,
+  });
   const postLocation = () => {
     try {
       window.parent.postMessage({
@@ -314,6 +318,7 @@ function bootPreviewMode() {
     if (e.source !== window.parent) return;
     const d = e.data;
     if (!d || typeof d !== 'object') return;
+    console.log('[chorus/preview-mode] message from parent', d.type);
     if (d.type === 'chorus:parent:start-pick') startPick();
     if (d.type === 'chorus:parent:cancel-pick') cancelPick();
   });
@@ -1315,14 +1320,22 @@ function boot({ inIframe = false } = {}) {
   function enterPickMode() {
     if (state.pickMode) return;
     // Delegate into preview iframe if showing
+    if (DEBUG) {
+      console.log('[chorus] enterPickMode', {
+        previewShowing: preview.isShowing(),
+        hasIframe: !!document.getElementById('oss-kanban-preview-iframe'),
+      });
+    }
     if (preview.isShowing()) {
       const iframe = document.getElementById('oss-kanban-preview-iframe');
       if (iframe?.contentWindow) {
         state.pickMode = true;
         closePanel();
         try {
+          if (DEBUG) console.log('[chorus] → postMessage start-pick to iframe');
           iframe.contentWindow.postMessage({ type: 'chorus:parent:start-pick' }, '*');
-        } catch {
+        } catch (err) {
+          if (DEBUG) console.log('[chorus] postMessage failed', err);
           state.pickMode = false;
         }
         return;
