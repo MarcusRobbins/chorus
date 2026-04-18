@@ -53,8 +53,8 @@ const CSS_TEXT = `
     border: 1px solid #ccc; background: white; border-radius: 4px;
     cursor: pointer;
   }
-  .panel button.primary { background: #111; color: white; border-color: #111; }
-  .panel button.primary:disabled { background: #aaa; border-color: #aaa; cursor: default; }
+  .panel button.primary { background: #16a34a; color: white; border-color: #16a34a; }
+  .panel button.primary:disabled { background: #86efac; border-color: #86efac; cursor: default; }
   .panel button.github { background: #24292f; color: white; border-color: #24292f; }
   .panel button.linkish {
     background: transparent; border: none; color: #0366d6;
