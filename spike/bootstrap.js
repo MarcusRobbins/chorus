@@ -19,12 +19,33 @@ const setStatus = (msg, isError = false) => {
 // import map, not by the bundler.
 const isBare = (p) => !p.startsWith('.') && !p.startsWith('/') && !p.startsWith('http');
 
+// Cache-buster for source fetches. When this page is loaded as a preview
+// iframe, the parent's preview.reload() sets ?t=<stamp> on the iframe URL —
+// we reuse that stamp so every fetch this page makes is a fresh URL from the
+// CDN's perspective (raw.githack / jsDelivr honour query strings as cache
+// keys). Fallback: Date.now on first cold load.
+const CB = new URL(location.href).searchParams.get('t') || Date.now().toString(36);
+
+function withCacheBuster(url) {
+  // Only apply to same-origin relative fetches — no point busting esbuild-
+  // wasm CDN downloads or external deps.
+  try {
+    const u = new URL(url, location.href);
+    if (u.origin !== location.origin) return url;
+    u.searchParams.set('_cb', CB);
+    return u.href;
+  } catch {
+    return url;
+  }
+}
+
 // Cache fetch results so probing + loading the same file does not double-fetch.
 const fetchCache = new Map();
 async function fetchText(url) {
   if (fetchCache.has(url)) return fetchCache.get(url);
+  const fetchUrl = withCacheBuster(url);
   try {
-    const res = await fetch(url);
+    const res = await fetch(fetchUrl);
     if (!res.ok) {
       fetchCache.set(url, null);
       return null;
