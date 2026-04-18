@@ -1224,6 +1224,9 @@ function boot() {
     // Settings
     on('[data-action="sign-out"]', 'click', signOut);
     on('[data-action="clear-key"]', 'click', () => { state.openaiKey = null; storeClear('openaiKey'); renderPanel(); });
+
+    // Settings link in the who strip (appears on multiple screens)
+    on('[data-action="goto-settings"]', 'click', () => navigate('settings'));
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -1701,12 +1704,6 @@ function boot() {
     `;
   }
 
-  // Wire goto-settings via delegation (gets re-wired in wirePanel chain)
-  // Actually simpler: handle in wirePanel
-  function wirePanelExtras() {
-    panelEl?.querySelector('[data-action="goto-settings"]')?.addEventListener('click', () => navigate('settings'));
-  }
-
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -1774,12 +1771,6 @@ function boot() {
   // Init: fetch branches once on boot (for Browse screen)
   // ═══════════════════════════════════════════════════════════════
   fetchBranches();
-
-  // Install hooks for the `who` strip Settings link (need to re-wire after each render)
-  const origRenderPanel = renderPanel;
-  // Wrap via setTimeout pattern: after each renderPanel, also wire the who-strip actions
-  const observer = new MutationObserver(() => wirePanelExtras());
-  observer.observe(root, { childList: true, subtree: true });
 
   log('loaded', { clientId: CLIENT_ID ? '(set)' : '(missing)', repo: REPO, proxy: AUTH_PROXY });
 
