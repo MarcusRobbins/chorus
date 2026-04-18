@@ -738,12 +738,12 @@ function boot({ inIframe = false } = {}) {
   function selectBranch(name) {
     state.currentBranch = name;
     state.featureBranch = name;
-    // Update preview iframe to this branch at the current path
-    if (name === 'main' || name === 'master') {
-      preview.hide();
-    } else {
-      preview.show(previewUrlFor(name));
-    }
+    // Always open a preview iframe — including for main. For the usual case
+    // (editing a target site like OSSKanban) this is slightly redundant with
+    // the "live site" you're already on, but it's essential for chorus-on-
+    // chorus where you need to see the inner-chorus trigger render. Users
+    // can always hit "Hide preview" if they don't want it.
+    preview.show(previewUrlFor(name));
     navigate('feature');
   }
 
