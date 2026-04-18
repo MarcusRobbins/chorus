@@ -65,6 +65,13 @@ const CSS_TEXT = `
     pointer-events: auto;
     overflow: hidden;
   }
+  /* When inside an iframe (in-iframe-full mode), mirror the trigger's
+     top-left position so the panel doesn't collide with the outer panel's
+     bottom-right position on the parent page. */
+  .panel.in-iframe {
+    bottom: auto; right: auto;
+    top: 60px; left: 16px;
+  }
 
   /* Header */
   .header {
@@ -568,7 +575,7 @@ function boot({ inIframe = false } = {}) {
     if (!state.open) { renderTrigger(); return; }
     panelEl?.remove();
     panelEl = document.createElement('div');
-    panelEl.className = 'panel';
+    panelEl.className = 'panel' + (inIframe ? ' in-iframe' : '');
 
     const header = renderHeader();
     const body = renderBody();
