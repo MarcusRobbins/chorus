@@ -12,15 +12,21 @@
 
 const ID = 'oss-kanban-preview-iframe';
 
-const STYLE_FULL =
-  'position:fixed; inset:0; width:100vw; height:100vh; border:0; ' +
-  'background:white; z-index:2147483640;';
+// Shared across both modes so the transition between them is smooth
+// (width/height/inset animate; no flicker on the src reload).
+const STYLE_BASE =
+  'position:fixed; border:0; background:white; z-index:2147483640; ' +
+  'transition: top .25s ease, left .25s ease, right .25s ease, bottom .25s ease, ' +
+  'width .25s ease, height .25s ease, border-radius .25s ease, box-shadow .25s ease;';
 
-const STYLE_WINDOWED =
-  'position:fixed; top:24px; left:24px; width:62vw; height:66vh; ' +
+const STYLE_FULL = STYLE_BASE +
+  'top:0; left:0; right:0; bottom:0; width:100vw; height:100vh; ' +
+  'border-radius:0; box-shadow:none;';
+
+const STYLE_WINDOWED = STYLE_BASE +
+  'top:24px; left:24px; right:auto; bottom:auto; width:62vw; height:66vh; ' +
   'border:1px solid #bbb; border-radius:10px; ' +
-  'box-shadow:0 20px 48px rgba(0,0,0,0.2); ' +
-  'background:white; z-index:2147483640;';
+  'box-shadow:0 20px 48px rgba(0,0,0,0.2);';
 
 export function show(url, opts = {}) {
   let iframe = document.getElementById(ID);
@@ -31,7 +37,21 @@ export function show(url, opts = {}) {
     document.body.appendChild(iframe);
   }
   iframe.style.cssText = opts.windowed ? STYLE_WINDOWED : STYLE_FULL;
+  iframe.dataset.windowed = opts.windowed ? '1' : '0';
   if (iframe.src !== url) iframe.src = url;
+  emit();
+}
+
+// Resize an already-visible preview iframe between full and windowed modes
+// WITHOUT reloading it. Used when the chorus panel opens/closes — the user
+// wants the preview to shrink out of the way so both the page underneath
+// and the panel are visible, without losing the iframe's current state.
+export function setWindowed(windowed) {
+  const iframe = document.getElementById(ID);
+  if (!iframe) return;
+  if ((iframe.dataset.windowed === '1') === !!windowed) return; // no-op
+  iframe.style.cssText = windowed ? STYLE_WINDOWED : STYLE_FULL;
+  iframe.dataset.windowed = windowed ? '1' : '0';
   emit();
 }
 

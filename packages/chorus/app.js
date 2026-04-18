@@ -588,16 +588,26 @@ function boot({ inIframe = false } = {}) {
   // needed on the pill itself.
   const IS_META = !inIframe && AUTO_PREVIEW;
 
-  // All preview-iframe opens route through this helper so the meta-editor
-  // case (chorus-on-chorus) opens the iframe in "windowed" mode. Other
-  // chorus embeds leave it at full-viewport.
+  // Is the iframe currently in a "get out of the way" state?
+  //  - Chorus-on-chorus (meta): always windowed. The demo relies on seeing
+  //    both outer and inner chorus at once.
+  //  - Normal embeds (OSSKanban etc.): windowed only when the chorus panel
+  //    is open. Otherwise full-viewport, so the branch preview reads as
+  //    "the site", not a small inset. Transitions smoothly when the user
+  //    opens/closes the panel.
+  function wantWindowed() {
+    return IS_META || state.open;
+  }
+
+  // All preview-iframe opens route through this helper so the mode is
+  // computed consistently from state.
   function showPreviewFrame(url) {
     if (DEBUG) {
       // Trace who called us so we can diagnose runaway loops.
       console.log('[chorus] showPreviewFrame →', url);
       console.trace('[chorus] caller');
     }
-    preview.show(url, { windowed: IS_META });
+    preview.show(url, { windowed: wantWindowed() });
   }
 
   // ── SHA-pinned preview URLs ────────────────────────────────────
@@ -677,12 +687,18 @@ function boot({ inIframe = false } = {}) {
   function openPanel() {
     state.open = true;
     trigger.style.display = 'none';
+    // Non-meta: shrink the preview iframe to windowed mode so the panel
+    // and the underlying site are both visible. Meta stays windowed.
+    preview.setWindowed(wantWindowed());
     renderPanel();
   }
   function closePanel() {
     state.open = false;
     panelEl?.remove(); panelEl = null;
     trigger.style.display = '';
+    // Expand the preview back to full on non-meta when there's nothing
+    // else to compete for screen real estate.
+    preview.setWindowed(wantWindowed());
     renderTrigger();
   }
 
