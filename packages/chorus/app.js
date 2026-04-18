@@ -580,6 +580,68 @@ function boot({ inIframe = false } = {}) {
     preview.show(url, { windowed: IS_META });
   }
 
+  // ── SHA-pinned preview URLs ────────────────────────────────────
+  // raw.githack.com with a branch name caches for ~10 minutes on its edge,
+  // which makes fast-iteration chorus-on-chorus miserable. rawcdn.githack.com
+  // with a commit SHA is immutable and never stale. We resolve the branch's
+  // tip SHA via the GitHub API, cache it, and build the URL against rawcdn.
+  const branchShaCache = new Map(); // branchName → { sha, fetchedAt }
+  const BRANCH_SHA_TTL_MS = 15 * 1000; // re-resolve if older than 15s
+
+  async function resolveBranchSha(branchName) {
+    const cached = branchShaCache.get(branchName);
+    if (cached && Date.now() - cached.fetchedAt < BRANCH_SHA_TTL_MS) {
+      return cached.sha;
+    }
+    try {
+      const token = auth.getToken();
+      const res = await fetch(
+        `https://api.github.com/repos/${OWNER}/${REPONAME}/branches/${encodeURIComponent(branchName)}`,
+        { headers: {
+            'Accept': 'application/vnd.github+json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          } }
+      );
+      if (!res.ok) throw new Error('branch-sha ' + res.status);
+      const data = await res.json();
+      const sha = data?.commit?.sha;
+      if (!sha) throw new Error('branch-sha: no commit sha in response');
+      branchShaCache.set(branchName, { sha, fetchedAt: Date.now() });
+      return sha;
+    } catch (err) {
+      if (DEBUG) console.log('[chorus] resolveBranchSha failed', branchName, err);
+      return null;
+    }
+  }
+
+  function buildPreviewUrl({ branch, sha, path = state.currentPath }) {
+    let cleanPath = String(path || 'index.html').replace(/^\/+/, '');
+    cleanPath = cleanPath.replace(new RegExp(`^${OWNER}/${REPONAME}/[^?#]+?/`), '');
+    const qIdx = cleanPath.indexOf('?');
+    const pathPart = qIdx >= 0 ? cleanPath.slice(0, qIdx) : cleanPath;
+    const queryPart = qIdx >= 0 ? cleanPath.slice(qIdx + 1) : '';
+    const sp = new URLSearchParams(queryPart);
+    sp.delete('t');
+    const rebuiltQuery = sp.toString();
+    // SHA-pinned → rawcdn (immutable, never stale). Fallback to branch URL on
+    // raw.githack if SHA resolution failed — worse caching but still works.
+    if (sha) {
+      return `https://rawcdn.githack.com/${OWNER}/${REPONAME}/${sha}/${pathPart}${rebuiltQuery ? '?' + rebuiltQuery : ''}`;
+    }
+    const sep = rebuiltQuery ? '&' : '?';
+    return `https://raw.githack.com/${OWNER}/${REPONAME}/${encodeURIComponent(branch)}/${pathPart}${rebuiltQuery ? '?' + rebuiltQuery : ''}${sep}t=${Date.now().toString(36)}`;
+  }
+
+  // Async "show preview for this branch, freshest content". Resolves the
+  // tip SHA first so we dodge raw.githack's edge cache entirely.
+  async function showBranchPreview(branchName, path = state.currentPath) {
+    const sha = await resolveBranchSha(branchName);
+    const url = buildPreviewUrl({ branch: branchName, sha, path });
+    if (DEBUG) console.log('[chorus] showBranchPreview', { branchName, sha: sha?.slice(0, 7), url });
+    showPreviewFrame(url);
+    return url;
+  }
+
   const trigger = document.createElement('button');
   trigger.className = 'trigger';
   trigger.addEventListener('click', () => {
@@ -830,7 +892,7 @@ function boot({ inIframe = false } = {}) {
     // the "live site" you're already on, but it's essential for chorus-on-
     // chorus where you need to see the inner-chorus trigger render. Users
     // can always hit "Hide preview" if they don't want it.
-    showPreviewFrame(previewUrlFor(name));
+    showBranchPreview(name);
     navigate('feature');
   }
 
@@ -852,21 +914,14 @@ function boot({ inIframe = false } = {}) {
     return rest + (location.search || '') + (location.hash || '');
   }
 
+  // Synchronous URL builder — returns SHA-pinned rawcdn URL if we already
+  // have the branch SHA cached, otherwise falls back to the branch URL on
+  // raw.githack (cached for 10min on its edge). Prefer showBranchPreview
+  // for freshness; use this only where we can't easily go async.
   function previewUrlFor(branchName, path = state.currentPath) {
-    let cleanPath = String(path || 'index.html').replace(/^\/+/, '');
-    // Defensive: if currentPath somehow got a raw.githack prefix baked in
-    // (e.g. from an old session), re-strip it before building the URL so we
-    // don't end up with /owner/repo/branch/owner/repo/branch/… nesting.
-    cleanPath = cleanPath.replace(new RegExp(`^${OWNER}/${REPONAME}/[^?#]+?/`), '');
-    // Strip any leftover t= cache-buster from the path's query
-    const qIdx = cleanPath.indexOf('?');
-    let pathPart = qIdx >= 0 ? cleanPath.slice(0, qIdx) : cleanPath;
-    let queryPart = qIdx >= 0 ? cleanPath.slice(qIdx + 1) : '';
-    const sp = new URLSearchParams(queryPart);
-    sp.delete('t');
-    const rebuiltQuery = sp.toString();
-    const sep = rebuiltQuery ? '&' : '?';
-    return `https://raw.githack.com/${OWNER}/${REPONAME}/${encodeURIComponent(branchName)}/${pathPart}${rebuiltQuery ? '?' + rebuiltQuery : ''}${sep}t=${Date.now().toString(36)}`;
+    const cached = branchShaCache.get(branchName);
+    const sha = cached?.sha;
+    return buildPreviewUrl({ branch: branchName, sha, path });
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -1267,7 +1322,7 @@ function boot({ inIframe = false } = {}) {
     on('[data-action="hide-preview"]', 'click', () => { preview.hide(); renderPanel(); });
     on('[data-action="show-preview"]', 'click', () => {
       if (state.featureBranch) {
-        showPreviewFrame(previewUrlFor(state.featureBranch));
+        showBranchPreview(state.featureBranch);
         renderPanel();
       }
     });
@@ -1667,15 +1722,17 @@ function boot({ inIframe = false } = {}) {
       summary: null,
       branch,
       workingRef: branch,
-      previewUrl: previewUrlFor(branch),
+      previewUrl: previewUrlFor(branch), // may be branch URL; refreshed post-commit
       followUpDraft: '',
       error: null,
     };
     if (issue) {
       state.ai.issueHtmlUrl = issue.html_url;
     }
-    // Pre-show the preview so user sees the current branch state
-    showPreviewFrame(state.ai.previewUrl);
+    // Pre-show the preview so user sees the current branch state.
+    // Resolve the SHA asynchronously so we hit rawcdn (immutable) not
+    // raw.githack (10-min edge cache).
+    showBranchPreview(branch).then((url) => { if (state.ai) state.ai.previewUrl = url; });
     navigate('ai');
   }
 
@@ -1740,11 +1797,15 @@ function boot({ inIframe = false } = {}) {
     const commitMessage = result.summary
       ? `${result.summary}\n\nRefs #${issue?.number ?? ''}`
       : `AI edits (turn ${state.ai.turn})`;
-    await gh.commitFiles(state.token, OWNER, REPONAME, {
+    const commitRes = await gh.commitFiles(state.token, OWNER, REPONAME, {
       branch, startFrom: firstTurn ? defaultBranch : undefined,
       message: commitMessage, files: state.ai.staged,
     });
-    const previewUrl = `https://raw.githack.com/${OWNER}/${REPONAME}/${branch}/index.html?t=${Date.now().toString(36)}`;
+    // Update our SHA cache to the brand-new commit so subsequent
+    // showBranchPreview / previewUrlFor calls use the immutable rawcdn URL.
+    if (commitRes?.sha) branchShaCache.set(branch, { sha: commitRes.sha, fetchedAt: Date.now() });
+    const previewPath = state.currentPath || 'index.html';
+    const previewUrl = buildPreviewUrl({ branch, sha: commitRes?.sha, path: previewPath });
     if (issue?.number) {
       await safe(() => gh.createIssueComment(
         state.token, OWNER, REPONAME, issue.number,
@@ -1759,12 +1820,10 @@ function boot({ inIframe = false } = {}) {
     state.ai.summary = result.summary;
     state.ai.status = 'done';
 
-    // Always show/refresh preview with a fresh URL
-    if (firstTurn || !preview.isShowing()) {
-      showPreviewFrame(previewUrl);
-    } else {
-      showPreviewFrame(previewUrl);  // explicit new URL triggers re-navigation
-    }
+    // Always show/refresh preview with the SHA-pinned URL. rawcdn is
+    // immutable so there's no cache to bust — but we still call show
+    // with a fresh URL so the iframe actually navigates.
+    showPreviewFrame(previewUrl);
     renderPanel();
   }
 
@@ -1894,7 +1953,8 @@ function boot({ inIframe = false } = {}) {
   });
 
   // Given a full raw.githack URL, return just the site-relative path+query+hash.
-  // Strips the /owner/repo/branch/ prefix and any `t=` cache-buster we added.
+  // Handles both raw.githack.com/owner/repo/BRANCH/path and
+  // rawcdn.githack.com/owner/repo/SHA/path. Strips any `t=` cache-buster.
   function sitePathFromRawGithack(href) {
     try {
       const url = new URL(href);
@@ -1902,17 +1962,24 @@ function boot({ inIframe = false } = {}) {
       const parts = url.pathname.split('/').filter(Boolean);
       if (parts.length < 3) return null;
 
-      // Match branch against state.currentBranch / featureBranch if we can —
-      // branches can contain slashes (feature/testy), so a naive "drop first
-      // 3 segments" would fail for multi-segment branch names.
-      const known = state.currentBranch || state.featureBranch;
+      // If the third segment looks like a full/short Git SHA, consume exactly
+      // one segment for the ref. Otherwise match against the known branch
+      // (branch names can contain slashes — e.g. `feature/foo` — so a flat
+      // "drop 3 segments" rule would mis-parse those).
+      const refLike = parts[2] || '';
+      const isSha = /^[0-9a-f]{7,40}$/i.test(refLike);
       let consumed;
-      if (known) {
-        const knownSegs = known.split('/');
-        const match = knownSegs.every((s, i) => parts[2 + i] === s);
-        consumed = 2 + (match ? knownSegs.length : 1);
+      if (isSha) {
+        consumed = 3;
       } else {
-        consumed = 3; // best-effort: owner + repo + first branch segment
+        const known = state.currentBranch || state.featureBranch;
+        if (known) {
+          const knownSegs = known.split('/');
+          const match = knownSegs.every((s, i) => parts[2 + i] === s);
+          consumed = 2 + (match ? knownSegs.length : 1);
+        } else {
+          consumed = 3;
+        }
       }
       const sitePathSegs = parts.slice(consumed);
       let sitePath = sitePathSegs.join('/') || 'index.html';
@@ -1959,7 +2026,7 @@ function boot({ inIframe = false } = {}) {
   // doesn't recursively open another iframe — which would open another, etc.
   // Only the top-level chorus auto-previews.
   if (AUTO_PREVIEW && !inIframe) {
-    showPreviewFrame(previewUrlFor(state.currentBranch));
+    showBranchPreview(state.currentBranch);
   }
 
   log('loaded', { clientId: CLIENT_ID ? '(set)' : '(missing)', repo: REPO, proxy: AUTH_PROXY });
