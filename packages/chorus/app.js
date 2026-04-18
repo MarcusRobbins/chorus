@@ -412,6 +412,11 @@ function boot({ inIframe = false } = {}) {
   const AUTH_PROXY = script?.dataset?.githubAuthProxy || '';
   const DEFAULT_MODEL = script?.dataset?.openaiModel || 'gpt-4o';
   const DEBUG = script?.dataset?.debug === 'true';
+  // data-auto-preview: open a preview iframe of the current branch on boot,
+  // so the user always sees both the outer (stable) and inner (branch
+  // version) chorus instances side-by-side. Intended for the chorus-on-
+  // chorus test-site; regular embeds leave this off.
+  const AUTO_PREVIEW = script?.dataset?.autoPreview === 'true';
   const SCOPES = 'public_repo workflow';
 
   const [OWNER, REPONAME] = REPO.split('/');
@@ -1858,6 +1863,13 @@ function boot({ inIframe = false } = {}) {
   // Init: fetch branches once on boot (for Browse screen)
   // ═══════════════════════════════════════════════════════════════
   fetchBranches();
+
+  // Auto-open the preview iframe on boot (opt-in via data-auto-preview="true").
+  // This makes the chorus-on-chorus test-site always show both pills — outer
+  // (stable, from the main branch) and inner (current branch being viewed).
+  if (AUTO_PREVIEW) {
+    preview.show(previewUrlFor(state.currentBranch));
+  }
 
   log('loaded', { clientId: CLIENT_ID ? '(set)' : '(missing)', repo: REPO, proxy: AUTH_PROXY });
 
