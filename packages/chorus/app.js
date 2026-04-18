@@ -117,11 +117,11 @@ const CSS_TEXT = `
   .action-bar .primary {
     font: inherit; font-size: 13px; font-weight: 500;
     padding: 8px 16px; border-radius: 6px; cursor: pointer;
-    background: #111; color: #fff; border: 1px solid #111;
+    background: #c00; color: #fff; border: 1px solid #c00;
   }
   .action-bar .primary:disabled { background: #aaa; border-color: #aaa; cursor: default; }
   .action-bar .primary.green { background: #2a6; border-color: #2a6; }
-  .action-bar .primary:hover:not(:disabled) { background: #222; }
+  .action-bar .primary:hover:not(:disabled) { background: #d11; border-color: #d11; }
 
   /* Form controls */
   label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #444; }
