@@ -326,17 +326,21 @@ function bootPreviewMode() {
   function startPick() {
     if (picking) return;
     picking = true;
+    // z-index must beat the inner chorus's own shadow-host (2147483646) so
+    // the picker overlay + hint render on TOP of the inner popover rather
+    // than being hidden behind it. Without this the red highlight is
+    // invisible when hovering inside the popover.
     overlay = document.createElement('div');
     overlay.style.cssText =
       'position:fixed; pointer-events:none; border:2px solid #c33; ' +
-      'background:rgba(204,51,51,0.08); z-index:2147483645; ' +
+      'background:rgba(204,51,51,0.08); z-index:2147483647; ' +
       'transition:all .05s linear; display:none;';
     document.body.appendChild(overlay);
     hint = document.createElement('div');
     hint.style.cssText =
       'position:fixed; top:16px; left:50%; transform:translateX(-50%); ' +
       'background:#111; color:#fff; padding:6px 12px; border-radius:6px; ' +
-      'font-size:12px; pointer-events:none; z-index:2147483645; ' +
+      'font-size:12px; pointer-events:none; z-index:2147483647; ' +
       'font-family:system-ui,sans-serif;';
     hint.textContent = 'Click any element · Esc to cancel';
     document.body.appendChild(hint);
