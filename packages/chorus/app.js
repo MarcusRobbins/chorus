@@ -37,15 +37,6 @@ const CSS_TEXT = `
     max-width: 340px;
   }
   .trigger:hover { background: #222; transform: translateY(-1px); }
-  /* When rendered inside an iframe with data-preview-mode="full" (the
-     chorus-on-chorus demo), flip to the opposite corner so two FABs (outer
-     stable + inner branch-version) don't stack on top of each other. */
-  .trigger.in-iframe {
-    bottom: auto; right: auto;
-    top: 16px; left: 16px;
-    background: #2a5bb3;
-  }
-  .trigger.in-iframe:hover { background: #336ccc; }
   .trigger .dot {
     width: 8px; height: 8px; border-radius: 4px; background: #666; flex-shrink: 0;
   }
@@ -64,13 +55,6 @@ const CSS_TEXT = `
     display: flex; flex-direction: column;
     pointer-events: auto;
     overflow: hidden;
-  }
-  /* When inside an iframe (in-iframe-full mode), mirror the trigger's
-     top-left position so the panel doesn't collide with the outer panel's
-     bottom-right position on the parent page. */
-  .panel.in-iframe {
-    bottom: auto; right: auto;
-    top: 60px; left: 16px;
   }
 
   /* Header */
@@ -505,8 +489,23 @@ function boot({ inIframe = false } = {}) {
   styleEl.textContent = CSS_TEXT;
   root.appendChild(styleEl);
 
+  // When this chorus is acting as a meta-editor (auto-preview enabled on the
+  // top-level page), preview iframes open in a "windowed" mode — a bordered,
+  // smaller-than-viewport frame — so the inner chorus inside it lives at its
+  // own bottom-right without colliding with this (outer) chorus's bottom-
+  // right. The visual container IS the cue; no position or colour overrides
+  // needed on the pill itself.
+  const IS_META = !inIframe && AUTO_PREVIEW;
+
+  // All preview-iframe opens route through this helper so the meta-editor
+  // case (chorus-on-chorus) opens the iframe in "windowed" mode. Other
+  // chorus embeds leave it at full-viewport.
+  function showPreviewFrame(url) {
+    preview.show(url, { windowed: IS_META });
+  }
+
   const trigger = document.createElement('button');
-  trigger.className = 'trigger' + (inIframe ? ' in-iframe' : '');
+  trigger.className = 'trigger';
   trigger.addEventListener('click', () => {
     state.open ? closePanel() : openPanel();
   });
@@ -575,7 +574,7 @@ function boot({ inIframe = false } = {}) {
     if (!state.open) { renderTrigger(); return; }
     panelEl?.remove();
     panelEl = document.createElement('div');
-    panelEl.className = 'panel' + (inIframe ? ' in-iframe' : '');
+    panelEl.className = 'panel';
 
     const header = renderHeader();
     const body = renderBody();
@@ -755,7 +754,7 @@ function boot({ inIframe = false } = {}) {
     // the "live site" you're already on, but it's essential for chorus-on-
     // chorus where you need to see the inner-chorus trigger render. Users
     // can always hit "Hide preview" if they don't want it.
-    preview.show(previewUrlFor(name));
+    showPreviewFrame(previewUrlFor(name));
     navigate('feature');
   }
 
@@ -1192,7 +1191,7 @@ function boot({ inIframe = false } = {}) {
     on('[data-action="hide-preview"]', 'click', () => { preview.hide(); renderPanel(); });
     on('[data-action="show-preview"]', 'click', () => {
       if (state.featureBranch) {
-        preview.show(previewUrlFor(state.featureBranch));
+        showPreviewFrame(previewUrlFor(state.featureBranch));
         renderPanel();
       }
     });
@@ -1592,7 +1591,7 @@ function boot({ inIframe = false } = {}) {
       state.ai.issueHtmlUrl = issue.html_url;
     }
     // Pre-show the preview so user sees the current branch state
-    preview.show(state.ai.previewUrl);
+    showPreviewFrame(state.ai.previewUrl);
     navigate('ai');
   }
 
@@ -1678,9 +1677,9 @@ function boot({ inIframe = false } = {}) {
 
     // Always show/refresh preview with a fresh URL
     if (firstTurn || !preview.isShowing()) {
-      preview.show(previewUrl);
+      showPreviewFrame(previewUrl);
     } else {
-      preview.show(previewUrl);  // explicit new URL triggers re-navigation
+      showPreviewFrame(previewUrl);  // explicit new URL triggers re-navigation
     }
     renderPanel();
   }
@@ -1875,7 +1874,7 @@ function boot({ inIframe = false } = {}) {
   // This makes the chorus-on-chorus test-site always show both pills — outer
   // (stable, from the main branch) and inner (current branch being viewed).
   if (AUTO_PREVIEW) {
-    preview.show(previewUrlFor(state.currentBranch));
+    showPreviewFrame(previewUrlFor(state.currentBranch));
   }
 
   log('loaded', { clientId: CLIENT_ID ? '(set)' : '(missing)', repo: REPO, proxy: AUTH_PROXY });
