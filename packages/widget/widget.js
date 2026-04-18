@@ -326,6 +326,14 @@ function boot() {
   }
 
   function ticketFormHtml() {
+    // After filing, replace the form entirely with a "what next?" card. The
+    // form going away signals that the filing is done; the success card gives
+    // a single clear primary action (Build with AI) and escape hatches.
+    if (state.lastIssue) return ticketFiledHtml();
+    return ticketFormInputsHtml();
+  }
+
+  function ticketFormInputsHtml() {
     const capture = state.capture;
     const captureClass = capture ? 'capture' : 'capture empty';
     const captureText = capture
@@ -334,7 +342,6 @@ function boot() {
     const hasAll = state.name.trim() && state.description.trim();
     const submitDisabled = !hasAll || state.submitting ? 'disabled' : '';
     const submitLabel = state.submitting ? 'Filing…' : 'File issue';
-    const filed = state.lastIssue;
     const slugPreview = slugify(state.name);
     return `
       <label>
@@ -357,14 +364,27 @@ function boot() {
           <button class="primary" data-action="submit" ${submitDisabled}>${submitLabel}</button>
         </div>
       </div>
-      ${filed ? `
-        <div class="ok">
-          Filed · <a href="${esc(filed.html_url)}" target="_blank" rel="noopener">#${filed.number}</a>
+    `;
+  }
+
+  function ticketFiledHtml() {
+    const filed = state.lastIssue;
+    const branchName = `feature/${slugify(state.name) || 'ticket-' + filed.number}`;
+    return `
+      <div class="ok">
+        Filed <a href="${esc(filed.html_url)}" target="_blank" rel="noopener">#${filed.number}</a>
+        · branch <code>${esc(branchName)}</code>
+      </div>
+      <p class="muted" style="margin: 2px 0;">
+        What next? Run the AI now to propose a change, or leave it for someone else to build.
+      </p>
+      <div class="row">
+        <div class="row-r">
+          <button data-action="file-another">File another</button>
+          <button data-action="close">Close</button>
         </div>
-        <div class="row r-end">
-          <button class="primary" data-action="ai-start">Build with AI</button>
-        </div>
-      ` : ''}
+        <button class="primary" data-action="ai-start">✨ Build with AI</button>
+      </div>
     `;
   }
 
@@ -466,6 +486,7 @@ function boot() {
     on('[data-action="submit"]',      'click', submitTicket);
 
     on('[data-action="ai-start"]',         'click', startAi);
+    on('[data-action="file-another"]',     'click', fileAnother);
     on('[data-action="ai-go"]',            'click', aiGo);
     on('[data-action="ai-cancel"]',        'click', aiCancel);
     on('[data-action="ai-abort"]',         'click', aiAbort);
@@ -788,6 +809,16 @@ function boot() {
     } else {
       beginAiRun();
     }
+    renderPanel();
+  }
+
+  // Post-filing reset — user wants to file another change without running AI
+  // on the last one. Keeps auth + OpenAI key, wipes per-ticket fields.
+  function fileAnother() {
+    state.lastIssue = null;
+    state.name = '';
+    state.description = '';
+    state.capture = null;
     renderPanel();
   }
 
