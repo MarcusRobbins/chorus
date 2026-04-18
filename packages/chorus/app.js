@@ -697,6 +697,7 @@ function boot({ inIframe = false } = {}) {
     trigger.style.display = 'none';
     // Non-meta: shrink the preview iframe to windowed mode so the panel
     // and the underlying site are both visible. Meta stays windowed.
+    if (DEBUG) console.log('[chorus] openPanel → setWindowed', wantWindowed(), { IS_META, hasIframe: preview.isShowing() });
     preview.setWindowed(wantWindowed());
     renderPanel();
   }
@@ -706,6 +707,7 @@ function boot({ inIframe = false } = {}) {
     trigger.style.display = '';
     // Expand the preview back to full on non-meta when there's nothing
     // else to compete for screen real estate.
+    if (DEBUG) console.log('[chorus] closePanel → setWindowed', wantWindowed(), { IS_META, hasIframe: preview.isShowing() });
     preview.setWindowed(wantWindowed());
     renderTrigger();
   }

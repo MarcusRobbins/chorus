@@ -12,21 +12,32 @@
 
 const ID = 'oss-kanban-preview-iframe';
 
-// Shared across both modes so the transition between them is smooth
-// (width/height/inset animate; no flicker on the src reload).
-const STYLE_BASE =
+// Constant part of the style — set once on iframe creation. Properties that
+// change between full and windowed mode are set individually on .style.*
+// (not via cssText) so the browser sees them as transitions, not as a
+// wholesale style replacement that it might coalesce with the previous set.
+const STYLE_CONSTANT =
   'position:fixed; border:0; background:white; z-index:2147483640; ' +
   'transition: top .25s ease, left .25s ease, right .25s ease, bottom .25s ease, ' +
-  'width .25s ease, height .25s ease, border-radius .25s ease, box-shadow .25s ease;';
+  'width .25s ease, height .25s ease, border-radius .25s ease, box-shadow .25s ease, border-color .25s ease;';
 
-const STYLE_FULL = STYLE_BASE +
-  'top:0; left:0; right:0; bottom:0; width:100vw; height:100vh; ' +
-  'border-radius:0; box-shadow:none;';
-
-const STYLE_WINDOWED = STYLE_BASE +
-  'top:24px; left:24px; right:auto; bottom:auto; width:62vw; height:66vh; ' +
-  'border:1px solid #bbb; border-radius:10px; ' +
-  'box-shadow:0 20px 48px rgba(0,0,0,0.2);';
+function applyMode(iframe, windowed) {
+  const s = iframe.style;
+  if (windowed) {
+    s.top = '24px'; s.left = '24px'; s.right = 'auto'; s.bottom = 'auto';
+    s.width = '62vw'; s.height = '66vh';
+    s.borderRadius = '10px';
+    s.borderWidth = '1px'; s.borderStyle = 'solid'; s.borderColor = '#bbb';
+    s.boxShadow = '0 20px 48px rgba(0,0,0,0.2)';
+  } else {
+    s.top = '0'; s.left = '0'; s.right = '0'; s.bottom = '0';
+    s.width = '100vw'; s.height = '100vh';
+    s.borderRadius = '0';
+    s.borderWidth = '0'; s.borderStyle = 'none'; s.borderColor = 'transparent';
+    s.boxShadow = 'none';
+  }
+  iframe.dataset.windowed = windowed ? '1' : '0';
+}
 
 export function show(url, opts = {}) {
   let iframe = document.getElementById(ID);
@@ -34,24 +45,26 @@ export function show(url, opts = {}) {
     iframe = document.createElement('iframe');
     iframe.id = ID;
     iframe.setAttribute('title', 'Branch preview');
+    // Apply the constant styles on creation via cssText (atomic, no flash),
+    // and the mode-specific styles via applyMode so a later setWindowed()
+    // animates individual properties rather than replacing the whole style.
+    iframe.style.cssText = STYLE_CONSTANT;
+    applyMode(iframe, !!opts.windowed);
     document.body.appendChild(iframe);
+  } else {
+    applyMode(iframe, !!opts.windowed);
   }
-  iframe.style.cssText = opts.windowed ? STYLE_WINDOWED : STYLE_FULL;
-  iframe.dataset.windowed = opts.windowed ? '1' : '0';
   if (iframe.src !== url) iframe.src = url;
   emit();
 }
 
 // Resize an already-visible preview iframe between full and windowed modes
-// WITHOUT reloading it. Used when the chorus panel opens/closes — the user
-// wants the preview to shrink out of the way so both the page underneath
-// and the panel are visible, without losing the iframe's current state.
+// WITHOUT reloading it. Used when the chorus panel opens/closes.
 export function setWindowed(windowed) {
   const iframe = document.getElementById(ID);
   if (!iframe) return;
   if ((iframe.dataset.windowed === '1') === !!windowed) return; // no-op
-  iframe.style.cssText = windowed ? STYLE_WINDOWED : STYLE_FULL;
-  iframe.dataset.windowed = windowed ? '1' : '0';
+  applyMode(iframe, !!windowed);
   emit();
 }
 
