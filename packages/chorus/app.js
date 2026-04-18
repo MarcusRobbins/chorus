@@ -403,6 +403,16 @@ function boot({ inIframe = false } = {}) {
   const AUTH_PROXY = script?.dataset?.githubAuthProxy || '';
   const DEFAULT_MODEL = script?.dataset?.openaiModel || 'gpt-4o';
   const DEBUG = script?.dataset?.debug === 'true';
+  // Boot-entry trace so we can tell from the console whether it's the outer
+  // (top-level) or inner (iframe) chorus that's reloading repeatedly.
+  if (DEBUG) {
+    console.log('[chorus] boot ENTER', {
+      inIframe,
+      origin: location.origin,
+      href: location.href,
+      scriptSrc: script?.src,
+    });
+  }
   // data-auto-preview: open a preview iframe of the current branch on boot,
   // so the user always sees both the outer (stable) and inner (branch
   // version) chorus instances side-by-side. Intended for the chorus-on-
