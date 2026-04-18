@@ -1215,7 +1215,11 @@ function boot() {
     if (firstTurn) {
       showPreview();
     } else if (preview.isShowing()) {
-      preview.reload();
+      // Use show() with the freshly-stamped previewUrl rather than reload(),
+      // which mutates the current iframe src in-place. show() is more direct
+      // — it guarantees a URL change (because state.ai.previewUrl has a fresh
+      // timestamp) and always triggers a proper iframe navigation.
+      preview.show(state.ai.previewUrl);
     }
 
     renderPanel();
