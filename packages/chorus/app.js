@@ -1917,9 +1917,10 @@ function boot({ inIframe = false } = {}) {
       'IMPORTANT: this element is inside a Web Component shadow root (note the ::shadow segment in the selector). It is NOT in a static HTML file.',
       'It is rendered by JavaScript that attaches a shadow root and writes template strings or DOM into it — commonly a widget or tool bundled into the page.',
       text
-        ? `To locate the source: list_files, then read the JS files (including any under packages/, widget/, vendor/, etc.) and grep for the literal visible text ${JSON.stringify(text)}. That is almost always a string inside a template literal, innerHTML assignment, or createElement chain inside a .js/.mjs/.ts file.`
+        ? `To locate the source: list_files, then for each plausible JS file use read_file and search the returned contents for the exact literal text ${JSON.stringify(text)}. You MUST confirm that string appears in the file before editing it — a file name or file size alone is not enough. Keep reading more files until you find the one that actually contains the string.`
         : 'To locate the source: read the JS files that attach shadow roots and find the element by its tag/class from the selector.',
       'Do NOT satisfy this ticket by editing top-level HTML/CSS unless you have confirmed the element actually lives there — shadow roots are isolated from outer CSS.',
+      'Do NOT write_file to any JS file you have not read and verified contains the relevant text/selector. If your first candidate file does not contain it, read another.',
     ].join('\n');
   }
 
