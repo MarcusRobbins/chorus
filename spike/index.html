@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Client-compile spike</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react/": "https://esm.sh/react@18.3.1/",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client"
+    }
+  }
+  </script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+    #boot-status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.8125rem;
+      color: #666;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      background: #fafafa;
+    }
+    #boot-status.error { color: #a00; background: #fff0f0; border-color: #f0c0c0; }
+    input { font: inherit; padding: 0.25rem 0.5rem; }
+    button { font: inherit; padding: 0.25rem 0.75rem; cursor: pointer; }
+    code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="boot-status">Booting…</div>
+  <div id="root"></div>
+  <script type="module" src="./bootstrap.js"></script>
+  <script type="module"
+    id="oss-kanban-widget"
+    src="/packages/widget/widget.js"
+    data-github-client-id="Ov23lijbc9rZ5Vi9o9F2"
+    data-github-repo="MarcusRobbins/OSSKanban"
+    data-github-auth-proxy="http://localhost:8787"
+    data-openai-model="gpt-4o"
+    data-debug="true"
+  ></script>
+  <script type="module"
+    id="oss-kanban-switcher"
+    src="/packages/switcher/switcher.js"
+    data-github-repo="MarcusRobbins/OSSKanban"
+    data-debug="true"
+  ></script>
+</body>
+</html>
