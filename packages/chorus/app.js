@@ -188,6 +188,38 @@ const CSS_TEXT = `
     background: var(--c-bg-muted); color: var(--c-text);
   }
 
+  /* Settings modal — overlay on top of the panel, click backdrop to close */
+  .settings-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 10, 0.36);
+    backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: auto;
+    z-index: 2147483647;
+    animation: settings-fade var(--t-med);
+  }
+  @keyframes settings-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .settings-modal {
+    width: min(460px, calc(100vw - 40px));
+    max-height: calc(100vh - 80px);
+    background: var(--c-bg);
+    color: var(--c-text);
+    border-radius: var(--r-lg);
+    border: 1px solid var(--c-border);
+    box-shadow: var(--shadow-xl);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    animation: settings-rise var(--t-spring);
+  }
+  @keyframes settings-rise {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .settings-modal > .body { padding: 16px; gap: 14px; }
+
   /* Header overflow menu dropdown */
   .menu-wrap { position: relative; }
   .menu {
@@ -1380,6 +1412,9 @@ function boot({ inIframe = false } = {}) {
     // Overflow menu (in header)
     menuOpen: false,
 
+    // Settings modal
+    settingsModalOpen: false,
+
     // Discussion threads (element-pinned comment threads)
     threads: [],               // list for current page/branch: Thread[]
     threadsLoading: false,
@@ -1615,10 +1650,9 @@ function boot({ inIframe = false } = {}) {
     renderPanel();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && state.menuOpen) {
-      state.menuOpen = false;
-      renderPanel();
-    }
+    if (e.key !== 'Escape') return;
+    if (state.settingsModalOpen) { state.settingsModalOpen = false; renderPanel(); return; }
+    if (state.menuOpen) { state.menuOpen = false; renderPanel(); }
   });
 
   // When this chorus is acting as a meta-editor (auto-preview enabled on the
@@ -1802,7 +1836,11 @@ function boot({ inIframe = false } = {}) {
 
   // ── Panel rendering ───────────────────────────────────────────
   function renderPanel() {
-    if (!state.open) { renderTrigger(); return; }
+    if (!state.open) {
+      // Panel closed — also clear any modals.
+      if (settingsModalEl) { settingsModalEl.remove(); settingsModalEl = null; }
+      renderTrigger(); return;
+    }
     panelEl?.remove();
     panelEl = document.createElement('div');
     // When the phylogeny is visible in the band below the iframe, the
@@ -1821,6 +1859,78 @@ function boot({ inIframe = false } = {}) {
 
     wirePanel();
     renderTrigger();
+    renderSettingsModal();
+  }
+
+  let settingsModalEl = null;
+  function renderSettingsModal() {
+    if (!state.settingsModalOpen) {
+      if (settingsModalEl) { settingsModalEl.remove(); settingsModalEl = null; }
+      return;
+    }
+    if (settingsModalEl) settingsModalEl.remove();
+    settingsModalEl = document.createElement('div');
+    settingsModalEl.className = 'settings-backdrop';
+    settingsModalEl.innerHTML = `
+      <div class="settings-modal">
+        <div class="header">
+          <div class="title">Settings</div>
+          <button class="close" data-action="close-settings" title="Close">✕</button>
+        </div>
+        <div class="body">
+          ${whoHtml()}
+          ${settingsHtml()}
+        </div>
+        <div class="action-bar">
+          ${settingsActions()}
+        </div>
+      </div>
+    `;
+    root.appendChild(settingsModalEl);
+    wireSettingsModal();
+  }
+
+  function wireSettingsModal() {
+    if (!settingsModalEl) return;
+    const on = (sel, ev, fn) => settingsModalEl.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
+    const close = () => { state.settingsModalOpen = false; renderPanel(); };
+    on('[data-action="close-settings"]', 'click', close);
+    // Click on the backdrop (outside the modal itself) closes.
+    settingsModalEl.addEventListener('click', (e) => {
+      if (e.target === settingsModalEl) close();
+    });
+    // Reuse the wirePanel handlers that map data-actions to settings
+    // behaviour, by attaching the same listeners scoped to the modal.
+    on('[data-action="sign-in"]', 'click', startDeviceFlow);
+    on('[data-action="sign-out"]', 'click', signOut);
+    on('[data-action="clear-key"]', 'click', () => {
+      state.openaiKey = null; storeClear('openaiKey'); renderPanel();
+    });
+    const modelSelect = settingsModalEl.querySelector('[data-field="model"]');
+    modelSelect?.addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (v === '__custom__') {
+        renderPanel();
+        settingsModalEl?.querySelector('[data-field="model-custom"]')?.focus();
+      } else {
+        state.openaiModel = v; storeSave('openaiModel', v); renderPanel();
+      }
+    });
+    const modelCustom = settingsModalEl.querySelector('[data-field="model-custom"]');
+    modelCustom?.addEventListener('input', (e) => {
+      const v = e.target.value.trim();
+      if (!v) return;
+      state.openaiModel = v; storeSave('openaiModel', v);
+    });
+    // OpenAI key input (appears when user is setting a key)
+    const keyInput = settingsModalEl.querySelector('[data-field="openai-key"]');
+    if (keyInput && state.openaiKey) keyInput.value = state.openaiKey;
+    on('[data-action="save-key"]', 'click', () => {
+      const v = settingsModalEl.querySelector('[data-field="openai-key"]')?.value?.trim();
+      if (!v) return;
+      state.openaiKey = v; storeSave('openaiKey', v);
+      renderPanel();
+    });
   }
 
   // Header
@@ -1888,10 +1998,10 @@ function boot({ inIframe = false } = {}) {
       case 'ai':            return state.ai?.status === 'running'
                               ? `AI working on <code>${esc(state.ai.branch || '…')}</code>`
                               : `<code>${esc(state.ai?.branch || '…')}</code>`;
-      case 'threadList':    return 'Discussions';
+      case 'threadList':    return 'Threads';
       case 'threadView':    return state.currentThread?.issue
-                              ? `Discussion #${state.currentThread.issue.number}`
-                              : 'Discussion';
+                              ? `Thread #${state.currentThread.issue.number}`
+                              : 'Thread';
       case 'signIn':        return 'Sign in with GitHub';
       case 'devicePending': return 'Enter the code on GitHub';
       case 'keyPrompt':     return 'OpenAI key';
@@ -1997,7 +2107,7 @@ function boot({ inIframe = false } = {}) {
       <button class="nav-card" data-action="goto-threads">
         <div class="nav-card-mark"></div>
         <div>
-          <div class="nav-card-title">Discussions</div>
+          <div class="nav-card-title">Threads</div>
           <div class="muted-s">Conversations pinned to elements on this page</div>
         </div>
         <div class="nav-card-chev">→</div>
@@ -2025,7 +2135,6 @@ function boot({ inIframe = false } = {}) {
       <div class="secondary">
         <button data-action="refresh-branches">Refresh</button>
       </div>
-      <button class="primary" data-action="goto-propose">✚ Start a thread</button>
     `;
   }
 
@@ -2225,7 +2334,7 @@ function boot({ inIframe = false } = {}) {
       <div class="secondary">
         ${!isMain && authed ? `<button data-action="merge" title="Merge this branch to main">Merge</button>` : ''}
       </div>
-      ${!isMain ? `<button class="primary" data-action="refine" ${authed ? '' : 'disabled title="Sign in to refine"'}>🤖 Refine with AI</button>` : `<button class="primary" data-action="goto-propose">✚ Start a thread</button>`}
+      ${!isMain ? `<button class="primary" data-action="refine" ${authed ? '' : 'disabled title="Sign in to refine"'}>🤖 Refine with AI</button>` : ''}
     `;
   }
 
@@ -2236,13 +2345,13 @@ function boot({ inIframe = false } = {}) {
     const loading = state.threadsLoading && !state.threads.length;
     const empty = !loading && !state.threads.length;
     return `
-      <p class="muted">Discussion threads on this page. Each is pinned to an element you can click back into.</p>
+      <p class="muted">Threads on this page. Each is pinned to an element you can click back into.</p>
       ${state.threadsError ? `<div class="err">${esc(state.threadsError)}</div>` : ''}
       ${loading ? `<div class="skeleton" style="height:60px;"></div><div class="skeleton" style="height:60px;"></div>` : ''}
       ${empty ? `
         <div class="empty-state">
-          <div class="empty-state-title">No discussions yet</div>
-          <div class="muted-s">Pick an element and click <strong>💬 Discuss</strong> to start a thread — conversation without running the AI.</div>
+          <div class="empty-state-title">No threads yet</div>
+          <div class="muted-s">Pick an element on the page and drop a comment. Any reply can later trigger an AI build on its own branch.</div>
         </div>
       ` : ''}
       <div class="thread-list">
@@ -2277,7 +2386,7 @@ function boot({ inIframe = false } = {}) {
       <div class="secondary">
         <button data-action="refresh-threads">Refresh</button>
       </div>
-      <button class="primary" data-action="goto-propose-discuss">💬 New discussion</button>
+      <button class="primary" data-action="goto-propose-discuss">+ New thread</button>
     `;
   }
 
@@ -2863,7 +2972,8 @@ function boot({ inIframe = false } = {}) {
     on('[data-action="set-view-list"]', 'click', () => setView('list'));
     on('[data-action="goto-settings-menu"]', 'click', () => {
       state.menuOpen = false;
-      navigate('settings');
+      state.settingsModalOpen = true;
+      renderPanel();
     });
     on('[data-action="sign-in-menu"]', 'click', () => {
       state.menuOpen = false;
@@ -3049,7 +3159,10 @@ function boot({ inIframe = false } = {}) {
     });
 
     // Settings link in the who strip (appears on multiple screens)
-    on('[data-action="goto-settings"]', 'click', () => navigate('settings'));
+    on('[data-action="goto-settings"]', 'click', () => {
+      state.settingsModalOpen = true;
+      renderPanel();
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════
