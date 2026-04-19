@@ -661,6 +661,133 @@ const CSS_TEXT = `
     100% { background-position: -200% 0; }
   }
 
+  /* ── Nav card (used in browse to link into sub-sections) ──── */
+  .nav-card {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; padding: 12px 14px; border-radius: var(--r-md);
+    background: var(--c-bg); border: 1px solid var(--c-border);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer; font: inherit; text-align: left;
+    transition: background var(--t-fast), border-color var(--t-fast),
+                transform var(--t-fast), box-shadow var(--t-fast);
+  }
+  .nav-card:hover {
+    background: var(--c-bg-subtle);
+    border-color: var(--c-border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+  .nav-card-mark {
+    width: 14px; height: 14px; border-radius: 999px;
+    background: var(--grad-accent);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15),
+                0 0 0 3px color-mix(in srgb, var(--c-accent) 12%, transparent);
+    flex-shrink: 0;
+  }
+  .nav-card-title {
+    font-size: 13px; font-weight: 600; color: var(--c-text);
+    letter-spacing: -0.01em; margin-bottom: 2px;
+  }
+  .nav-card-chev {
+    margin-left: auto; color: var(--c-text-faint);
+    font-size: 14px; font-weight: 500;
+    transition: color var(--t-fast), transform var(--t-fast);
+  }
+  .nav-card:hover .nav-card-chev { color: var(--c-accent); transform: translateX(2px); }
+
+  /* ── Thread list ──────────────────────────────────────────── */
+  .thread-list { display: flex; flex-direction: column; gap: 8px; }
+  .thread-item {
+    width: 100%; text-align: left; font: inherit;
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 10px 12px; border-radius: var(--r-md);
+    background: var(--c-bg); border: 1px solid var(--c-border);
+    cursor: pointer;
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  }
+  .thread-item:hover {
+    border-color: var(--c-border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .thread-item-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--c-text-muted);
+  }
+  .thread-item-head .thread-num {
+    font-family: var(--font-mono); font-size: 10.5px;
+    color: var(--c-text-faint);
+  }
+  .thread-item-head .thread-el {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--c-text-muted);
+  }
+  .thread-item-head .thread-age { font-size: 10.5px; color: var(--c-text-faint); }
+  .thread-item-body {
+    font-size: 13px; font-weight: 500; color: var(--c-text);
+    letter-spacing: -0.005em; line-height: 1.4;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .thread-item-meta { font-size: 11px; }
+
+  /* Thread view — pin summary + discussion */
+  .thread-pin {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 12px;
+    background: var(--c-accent-bg);
+    border: 1px solid color-mix(in srgb, var(--c-accent) 20%, transparent);
+    border-radius: var(--r-md);
+  }
+  .thread-pin-dot {
+    width: 12px; height: 12px; border-radius: 999px;
+    background: var(--grad-accent);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2),
+                0 0 0 3px color-mix(in srgb, var(--c-accent) 15%, transparent);
+    flex-shrink: 0; margin-top: 2px;
+  }
+  .thread-pin-el {
+    font-family: var(--font-mono); font-size: 12px; color: var(--c-accent-fg);
+    word-break: break-all;
+  }
+  .thread-discussion {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .thread-comment {
+    padding: 10px 12px; border-radius: var(--r-md);
+    background: var(--c-bg-subtle); border: 1px solid var(--c-border);
+  }
+  .thread-comment.initial {
+    background: var(--c-bg); border-color: var(--c-border-strong);
+  }
+  .thread-comment-hdr {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--c-text-muted);
+    margin-bottom: 5px;
+  }
+  .thread-comment-hdr img {
+    width: 16px; height: 16px; border-radius: 999px;
+    border: 1px solid var(--c-border);
+  }
+  .thread-comment-hdr .name { font-weight: 500; color: var(--c-text); }
+  .thread-comment-hdr .age { color: var(--c-text-faint); }
+  .thread-comment-body {
+    font-size: 12.5px; line-height: 1.55; color: var(--c-text);
+    white-space: pre-wrap; word-break: break-word;
+  }
+
+  /* Empty state card */
+  .empty-state {
+    padding: 20px 18px; text-align: left;
+    border: 1px dashed var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-bg-subtle);
+  }
+  .empty-state-title {
+    font-size: 13px; font-weight: 600; color: var(--c-text);
+    letter-spacing: -0.01em; margin-bottom: 4px;
+  }
+
   /* Inline link-style buttons (used in header strips etc.) */
   .link-btn {
     background: transparent; border: none; cursor: pointer;
@@ -879,7 +1006,96 @@ function bootPreviewMode() {
     console.log('[chorus/preview-mode] message from parent', d.type);
     if (d.type === 'chorus:parent:start-pick') startPick();
     if (d.type === 'chorus:parent:cancel-pick') cancelPick();
+    if (d.type === 'chorus:parent:render-pins') renderPins(d.pins || []);
   });
+
+  // Element-pinned discussion badges. Rendered into a fixed overlay that
+  // sits above the page content. On scroll/resize we reposition so pins
+  // stay attached to their target elements.
+  let pinsContainer = null;
+  let currentPins = [];
+  function renderPins(pins) {
+    currentPins = pins;
+    if (!pinsContainer) {
+      pinsContainer = document.createElement('div');
+      pinsContainer.style.cssText =
+        'position:fixed; inset:0; pointer-events:none; z-index:2147483644;';
+      document.body.appendChild(pinsContainer);
+      window.addEventListener('scroll', repositionPins, { passive: true, capture: true });
+      window.addEventListener('resize', repositionPins);
+    }
+    pinsContainer.innerHTML = '';
+    for (const p of pins) {
+      try {
+        const el = deepQuerySelector(p.selector);
+        if (!el) continue;
+        const badge = document.createElement('button');
+        badge.setAttribute('data-thread', String(p.number));
+        const count = Math.max(1, (p.replyCount || 0) + 1);
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.title = p.title || `Discussion #${p.number}`;
+        badge.style.cssText =
+          'position:fixed; pointer-events:auto; cursor:pointer; ' +
+          'min-width:24px; height:24px; padding:0 7px; border-radius:999px; ' +
+          'background:linear-gradient(135deg,#6366f1 0%,#4338ca 100%); ' +
+          'color:#fff; border:2px solid #fff; ' +
+          'font:500 11px Inter,system-ui,sans-serif; ' +
+          'display:inline-flex; align-items:center; justify-content:center; ' +
+          'box-shadow:0 4px 12px -2px rgba(67,56,202,0.4), 0 0 0 2px rgba(67,56,202,0.15); ' +
+          'transition:transform 120ms ease;';
+        badge.addEventListener('click', (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          try {
+            window.parent.postMessage({
+              type: 'chorus:preview:thread-open',
+              number: p.number,
+            }, '*');
+          } catch {}
+        });
+        badge.addEventListener('mouseenter', () => { badge.style.transform = 'scale(1.1)'; });
+        badge.addEventListener('mouseleave', () => { badge.style.transform = 'scale(1)'; });
+        pinsContainer.appendChild(badge);
+      } catch {}
+    }
+    repositionPins();
+  }
+  function repositionPins() {
+    if (!pinsContainer) return;
+    const badges = pinsContainer.children;
+    for (const badge of badges) {
+      const pin = currentPins.find((p) => String(p.number) === badge.getAttribute('data-thread'));
+      if (!pin) continue;
+      const el = deepQuerySelector(pin.selector);
+      if (!el) { badge.style.display = 'none'; continue; }
+      const r = el.getBoundingClientRect();
+      badge.style.display = 'inline-flex';
+      // Position at the top-right corner of the element, nudged up+right
+      // so the pin sits on the element's edge.
+      badge.style.left = (r.right - 10) + 'px';
+      badge.style.top = (r.top - 10) + 'px';
+    }
+  }
+  // Resolve a selector that may include '::shadow' boundary markers. We
+  // walk the selector segments separated by ::shadow, querying each and
+  // crossing shadow roots via .shadowRoot.
+  function deepQuerySelector(selector) {
+    if (!selector) return null;
+    if (!selector.includes('::shadow')) {
+      try { return document.querySelector(selector); } catch { return null; }
+    }
+    const segments = selector.split(/\s*>\s*::shadow\s*>\s*/);
+    let ctx = document;
+    for (let i = 0; i < segments.length; i++) {
+      try {
+        const found = ctx.querySelector(segments[i]);
+        if (!found) return null;
+        if (i === segments.length - 1) return found;
+        ctx = found.shadowRoot;
+        if (!ctx) return null;
+      } catch { return null; }
+    }
+    return null;
+  }
 
   function startPick() {
     if (picking) return;
@@ -1074,7 +1290,7 @@ function boot({ inIframe = false } = {}) {
     open: false,
 
     // Navigation
-    screen: 'browse',       // browse | propose | feature | ai | signIn | devicePending | keyPrompt | settings
+    screen: 'browse',       // browse | propose | feature | ai | threadList | threadView | signIn | devicePending | keyPrompt | settings
     backStack: [],          // array of { screen, ctx }
     pendingIntent: null,    // { afterSignIn: 'navigateToX' } for interstitials
 
@@ -1119,6 +1335,17 @@ function boot({ inIframe = false } = {}) {
 
     // Picker
     pickMode: false,
+
+    // Discussion threads (element-pinned comment threads)
+    threads: [],               // list for current page/branch: Thread[]
+    threadsLoading: false,
+    threadsError: null,
+    threadsLoadedFor: '',      // staleness key (page + branch)
+    currentThread: null,       // { issue, meta, initialText, comments }
+    currentThreadLoading: false,
+    threadComposeDraft: '',    // for thread-view reply compose
+    newThreadDraft: '',        // for thread-compose from browse/feature
+    newThreadFiling: false,
 
     // View mode — 'tree' (phylogeny) is the new default; 'list' is the
     // fallback in case the tree experiment doesn't land well.
@@ -1450,6 +1677,12 @@ function boot({ inIframe = false } = {}) {
     // Kick off phylogeny data load on first open. Safe to call repeatedly —
     // it no-ops if the branch-set hasn't changed.
     refreshPhylogeny();
+    // Load discussion threads in the background so pins can render on
+    // the preview iframe. Cheap: single labeled-issues API call, cached
+    // until the branch/page changes.
+    if (state.token && configOK()) {
+      loadThreads().catch(() => {});
+    }
   }
   function closePanel() {
     state.open = false;
@@ -1556,6 +1789,10 @@ function boot({ inIframe = false } = {}) {
       case 'ai':            return state.ai?.status === 'running'
                               ? `AI working on <code>${esc(state.ai.branch || '…')}</code>`
                               : `<code>${esc(state.ai?.branch || '…')}</code>`;
+      case 'threadList':    return 'Discussions';
+      case 'threadView':    return state.currentThread?.issue
+                              ? `Discussion #${state.currentThread.issue.number}`
+                              : 'Discussion';
       case 'signIn':        return 'Sign in with GitHub';
       case 'devicePending': return 'Enter the code on GitHub';
       case 'keyPrompt':     return 'OpenAI key';
@@ -1575,6 +1812,8 @@ function boot({ inIframe = false } = {}) {
         case 'propose':       return proposeHtml();
         case 'feature':       return featureHtml();
         case 'ai':            return aiHtml();
+        case 'threadList':    return threadListHtml();
+        case 'threadView':    return threadViewHtml();
         case 'signIn':        return signInHtml();
         case 'devicePending': return devicePendingHtml();
         case 'keyPrompt':     return keyPromptHtml();
@@ -1594,6 +1833,8 @@ function boot({ inIframe = false } = {}) {
       case 'propose':       html = proposeActions(); break;
       case 'feature':       html = featureActions(); break;
       case 'ai':            html = aiActions(); break;
+      case 'threadList':    html = threadListActions(); break;
+      case 'threadView':    html = threadViewActions(); break;
       case 'signIn':        html = signInActions(); break;
       case 'devicePending': html = deviceActions(); break;
       case 'keyPrompt':     html = keyPromptActions(); break;
@@ -1656,13 +1897,14 @@ function boot({ inIframe = false } = {}) {
       ${state.branchesLoading && !state.branches.length ? `
         <div class="skeleton" style="height:80px;"></div>
       ` : ''}
-      <div class="tree-hint">
-        <div class="tree-hint-mark" aria-hidden="true"></div>
+      <button class="nav-card" data-action="goto-threads">
+        <div class="nav-card-mark"></div>
         <div>
-          <div class="tree-hint-title">Phylogeny below</div>
-          <p class="muted-s">Click a branch on the tree to explore, or sprout a new one.</p>
+          <div class="nav-card-title">Discussions</div>
+          <div class="muted-s">Conversations pinned to elements on this page</div>
         </div>
-      </div>
+        <div class="nav-card-chev">→</div>
+      </button>
     `;
   }
 
@@ -1793,15 +2035,18 @@ function boot({ inIframe = false } = {}) {
   }
 
   function proposeActions() {
-    const canSubmit = state.name.trim() && state.description.trim() && !state.filing;
+    const hasText = state.description.trim();
+    const canTicket = state.name.trim() && hasText && !state.filing;
+    const canDiscuss = hasText && !!state.capture && !state.filing;
     const buildLabel = state.filing ? 'Filing…' : '🤖 File & build with AI';
     return `
       <div class="secondary">
         <button data-action="pick">${state.pickMode ? 'Cancel pick' : 'Pick element'}</button>
         ${state.capture ? `<button data-action="clear-capture">Clear</button>` : ''}
-        <button data-action="file-only" ${canSubmit ? '' : 'disabled'}>Just file it</button>
+        <button data-action="start-discussion" ${canDiscuss ? '' : 'disabled'} title="${state.capture ? 'Start a comment thread pinned to this element' : 'Pick an element first to discuss'}">💬 Discuss</button>
+        <button data-action="file-only" ${canTicket ? '' : 'disabled'}>Just file it</button>
       </div>
-      <button class="primary" data-action="file-and-build" ${canSubmit ? '' : 'disabled'}>${buildLabel}</button>
+      <button class="primary" data-action="file-and-build" ${canTicket ? '' : 'disabled'}>${buildLabel}</button>
     `;
   }
 
@@ -1894,6 +2139,279 @@ function boot({ inIframe = false } = {}) {
       </div>
       ${!isMain ? `<button class="primary" data-action="refine" ${authed ? '' : 'disabled title="Sign in to refine"'}>🤖 Refine with AI</button>` : `<button class="primary" data-action="goto-propose">✚ Suggest a change</button>`}
     `;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SCREEN: Thread list (element-pinned discussion threads)
+  // ═══════════════════════════════════════════════════════════════
+  function threadListHtml() {
+    const loading = state.threadsLoading && !state.threads.length;
+    const empty = !loading && !state.threads.length;
+    return `
+      ${whoHtml()}
+      <p class="muted">Discussion threads on this page. Each is pinned to an element you can click back into.</p>
+      ${state.threadsError ? `<div class="err">${esc(state.threadsError)}</div>` : ''}
+      ${loading ? `<div class="skeleton" style="height:60px;"></div><div class="skeleton" style="height:60px;"></div>` : ''}
+      ${empty ? `
+        <div class="empty-state">
+          <div class="empty-state-title">No discussions yet</div>
+          <div class="muted-s">Pick an element and click <strong>💬 Discuss</strong> to start a thread — conversation without running the AI.</div>
+        </div>
+      ` : ''}
+      <div class="thread-list">
+        ${state.threads.map(threadListItem).join('')}
+      </div>
+    `;
+  }
+
+  function threadListItem(t) {
+    const meta = t.meta || {};
+    const firstLine = (t.initialText || '').split('\n')[0].slice(0, 120);
+    const ageStr = relativeTimeStr(t.updated_at || t.created_at);
+    const tagLabel = meta.tag ? `<${esc(meta.tag)}>` : '';
+    const elText = meta.text ? `“${esc(meta.text.slice(0, 40))}${meta.text.length > 40 ? '…' : ''}”` : '';
+    return `
+      <button class="thread-item" data-action="open-thread" data-number="${t.number}">
+        <div class="thread-item-head">
+          <span class="thread-num">#${t.number}</span>
+          <span class="thread-el">${tagLabel} ${elText}</span>
+          <span class="thread-age">${esc(ageStr)}</span>
+        </div>
+        <div class="thread-item-body">${esc(firstLine)}</div>
+        <div class="thread-item-meta">
+          <span class="muted-s">${t.comments} ${t.comments === 1 ? 'reply' : 'replies'}</span>
+        </div>
+      </button>
+    `;
+  }
+
+  function threadListActions() {
+    return `
+      <div class="secondary">
+        <button data-action="refresh-threads">Refresh</button>
+      </div>
+      <button class="primary" data-action="goto-propose-discuss">💬 New discussion</button>
+    `;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SCREEN: Thread view (single discussion with replies)
+  // ═══════════════════════════════════════════════════════════════
+  function threadViewHtml() {
+    if (state.currentThreadLoading && !state.currentThread) {
+      return `<div class="skeleton" style="height:80px;"></div><div class="skeleton" style="height:60px;"></div>`;
+    }
+    const t = state.currentThread;
+    if (!t) return `<div class="muted">Thread not found.</div>`;
+    const meta = t.meta || {};
+    const elSummary = `<${esc(meta.tag || '?')}>${meta.text ? ` “${esc(meta.text.slice(0, 60))}${meta.text.length > 60 ? '…' : ''}”` : ''}`;
+    const pageStr = meta.page ? `<div class="muted-s">on <code>${esc(meta.page)}</code></div>` : '';
+    const comments = t.comments || [];
+    return `
+      ${whoHtml()}
+      <div class="thread-pin">
+        <div class="thread-pin-dot"></div>
+        <div>
+          <div class="thread-pin-el">${elSummary}</div>
+          ${pageStr}
+        </div>
+      </div>
+      <div class="thread-discussion">
+        ${threadComment({ author: t.issue?.user, body: t.initialText, created_at: t.issue?.created_at }, true)}
+        ${comments.map((c) => threadComment(c, false)).join('')}
+      </div>
+      <label class="field">
+        Reply
+        <textarea data-field="thread-reply" placeholder="Your thoughts…">${esc(state.threadComposeDraft || '')}</textarea>
+      </label>
+    `;
+  }
+
+  function threadComment(c, isInitial) {
+    const author = c.author || c.user || {};
+    const body = c.body || '';
+    const avatar = author.avatar_url ? `<img src="${esc(author.avatar_url)}" alt="" />` : '';
+    const login = author.login || 'someone';
+    const age = relativeTimeStr(c.created_at);
+    return `
+      <div class="thread-comment ${isInitial ? 'initial' : ''}">
+        <div class="thread-comment-hdr">
+          ${avatar}
+          <span class="name">${esc(login)}</span>
+          <span class="age">${esc(age)}</span>
+        </div>
+        <div class="thread-comment-body">${esc(body)}</div>
+      </div>
+    `;
+  }
+
+  function threadViewActions() {
+    const hasDraft = (state.threadComposeDraft || '').trim().length > 0;
+    const t = state.currentThread;
+    const issueOpen = t?.issue?.state === 'open';
+    return `
+      <div class="secondary">
+        ${t && issueOpen ? `<button data-action="promote-thread" title="Turn this discussion into a ticket and run AI on it">🚀 Promote to ticket</button>` : ''}
+        ${t && issueOpen ? `<button data-action="close-thread" title="Close this discussion">Resolve</button>` : ''}
+      </div>
+      <button class="primary" data-action="post-thread-reply" ${hasDraft ? '' : 'disabled'}>Post reply</button>
+    `;
+  }
+
+  function relativeTimeStr(iso) {
+    if (!iso) return '';
+    const d = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (d < 60) return 'just now';
+    if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+    if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+    if (d < 2592000) return `${Math.floor(d / 86400)}d ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+
+  // ── Thread data loaders ────────────────────────────────────────
+
+  async function loadThreads({ force = false } = {}) {
+    const page = state.currentPath || 'index.html';
+    const key = `${page}|${state.featureBranch || state.currentBranch || 'main'}`;
+    if (!force && state.threadsLoadedFor === key && state.threads.length) return;
+    state.threadsLoading = true;
+    state.threadsError = null;
+    renderPanel();
+    try {
+      const threads = await gh.listDiscussionThreads(state.token, OWNER, REPONAME, { page });
+      state.threads = threads;
+      state.threadsLoadedFor = key;
+    } catch (err) {
+      state.threadsError = String(err?.message || err);
+    } finally {
+      state.threadsLoading = false;
+      renderPanel();
+      // Send to iframe so pins render.
+      broadcastThreadsToPreview();
+    }
+  }
+
+  async function openThread(issueNumber) {
+    state.currentThread = null;
+    state.currentThreadLoading = true;
+    state.threadComposeDraft = '';
+    navigate('threadView');
+    try {
+      state.currentThread = await gh.getDiscussionThread(state.token, OWNER, REPONAME, issueNumber);
+    } catch (err) {
+      state.currentThread = null;
+      state.threadsError = String(err?.message || err);
+    } finally {
+      state.currentThreadLoading = false;
+      renderPanel();
+    }
+  }
+
+  async function startDiscussion() {
+    if (!requireAuth('threadList')) return;
+    if (!state.capture) return;
+    if (state.newThreadFiling) return;
+    const text = state.description.trim();
+    if (!text) return;
+    state.newThreadFiling = true;
+    state.filing = true;
+    renderPanel();
+    try {
+      const meta = {
+        selector: state.capture.selector,
+        text: state.capture.text,
+        tag: state.capture.tag,
+        page: state.currentPath || 'index.html',
+        bbox: state.capture.rect,
+      };
+      const title = 'Discussion on ' + (state.capture.text?.slice(0, 40) || `<${state.capture.tag}>`);
+      const issue = await gh.createDiscussionThread(state.token, OWNER, REPONAME, { title, text, meta });
+      // Reset compose state + navigate into the new thread.
+      state.description = '';
+      state.name = '';
+      state.capture = null;
+      state.threadsLoadedFor = ''; // force reload next time
+      openThread(issue.number);
+    } catch (err) {
+      state.authError = String(err?.message || err);
+      renderPanel();
+    } finally {
+      state.newThreadFiling = false;
+      state.filing = false;
+    }
+  }
+
+  async function postThreadReply() {
+    const t = state.currentThread;
+    if (!t?.issue) return;
+    const text = (state.threadComposeDraft || '').trim();
+    if (!text) return;
+    try {
+      const comment = await gh.createIssueComment(state.token, OWNER, REPONAME, t.issue.number, text);
+      t.comments = [...(t.comments || []), comment];
+      state.threadComposeDraft = '';
+      renderPanel();
+    } catch (err) {
+      console.warn('[chorus] post reply failed', err);
+    }
+  }
+
+  async function promoteThread() {
+    const t = state.currentThread;
+    if (!t?.issue) return;
+    try {
+      await gh.promoteThreadToTicket(state.token, OWNER, REPONAME, t.issue.number);
+      // After promotion the issue is a regular ticket. Hand off to the
+      // AI flow: set up the right capture, description, and kick off
+      // beginFirstAiTurn exactly as if the user had filed it fresh.
+      state._pendingIssue = {
+        number: t.issue.number,
+        html_url: t.issue.html_url,
+      };
+      state.capture = t.meta ? {
+        selector: t.meta.selector, text: t.meta.text, tag: t.meta.tag,
+        rect: t.meta.bbox, url: t.meta.page,
+      } : null;
+      state.description = t.initialText || '';
+      state.name = (t.issue.title || 'discussion').replace(/^discussion on\s+/i, '').slice(0, 40) || `issue-${t.issue.number}`;
+      if (!state.openaiKey) {
+        state.pendingIntent = 'build';
+        navigate('keyPrompt');
+        return;
+      }
+      beginFirstAiTurn();
+    } catch (err) {
+      console.warn('[chorus] promote failed', err);
+    }
+  }
+
+  async function closeThread() {
+    const t = state.currentThread;
+    if (!t?.issue) return;
+    try {
+      await gh.setIssueState(state.token, OWNER, REPONAME, t.issue.number, 'closed');
+      t.issue.state = 'closed';
+      renderPanel();
+    } catch (err) {
+      console.warn('[chorus] close thread failed', err);
+    }
+  }
+
+  // ── Pins on the preview iframe ────────────────────────────────
+  // Send the current thread list to the inner chorus so it can render
+  // clickable badges on the elements each thread references.
+  function broadcastThreadsToPreview() {
+    const iframe = document.getElementById('oss-kanban-preview-iframe');
+    if (!iframe?.contentWindow) return;
+    const payload = state.threads.map((t) => ({
+      number: t.number,
+      selector: t.meta?.selector || '',
+      replyCount: t.comments || 0,
+      title: t.issue?.title || '',
+    })).filter((t) => t.selector);
+    try {
+      iframe.contentWindow.postMessage({ type: 'chorus:parent:render-pins', pins: payload }, '*');
+    } catch {}
   }
 
   async function loadFeature(branchName) {
@@ -2215,6 +2733,42 @@ function boot({ inIframe = false } = {}) {
     on('[data-action="clear-capture"]', 'click', () => { state.capture = null; renderPanel(); });
     on('[data-action="file-and-build"]', 'click', () => submitTicket(true));
     on('[data-action="file-only"]', 'click', () => submitTicket(false));
+    on('[data-action="start-discussion"]', 'click', startDiscussion);
+
+    // Discussions
+    on('[data-action="goto-threads"]', 'click', () => {
+      navigate('threadList');
+      loadThreads();
+    });
+    on('[data-action="refresh-threads"]', 'click', () => loadThreads({ force: true }));
+    on('[data-action="goto-propose-discuss"]', 'click', () => {
+      if (!requireAuth('propose')) return;
+      if (!state.capture) {
+        // No element picked yet — nudge them into picker mode on propose.
+        navigate('propose');
+        setTimeout(() => enterPickMode(), 10);
+      } else {
+        navigate('propose');
+      }
+    });
+    panelEl.querySelectorAll('[data-action="open-thread"]').forEach((el) => {
+      el.addEventListener('click', () => openThread(Number(el.dataset.number)));
+    });
+    const replyTa = panelEl.querySelector('[data-field="thread-reply"]');
+    replyTa?.addEventListener('input', (e) => {
+      const prev = (state.threadComposeDraft || '').trim().length > 0;
+      const now = e.target.value.trim().length > 0;
+      state.threadComposeDraft = e.target.value;
+      if (prev !== now) {
+        // Refresh the action bar without losing focus.
+        renderPanel();
+        const again = panelEl?.querySelector('[data-field="thread-reply"]');
+        if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+      }
+    });
+    on('[data-action="post-thread-reply"]', 'click', postThreadReply);
+    on('[data-action="promote-thread"]', 'click', promoteThread);
+    on('[data-action="close-thread"]', 'click', closeThread);
 
     // Feature
     on('[data-action="refine"]', 'click', () => {
@@ -3026,7 +3580,14 @@ function boot({ inIframe = false } = {}) {
     if (sitePath == null) return;
     if (sitePath !== state.currentPath) {
       state.currentPath = sitePath;
+      state.threadsLoadedFor = ''; // page changed → threads cache stale
       if (state.open) renderPanel();
+      if (state.token && configOK()) loadThreads().catch(() => {});
+    } else {
+      // Same path but inner chorus just (re)booted — rebroadcast pins.
+      // Slight delay so the inner's bootPreviewMode message listener is
+      // definitely installed before we post.
+      setTimeout(broadcastThreadsToPreview, 100);
     }
   });
 
@@ -3091,6 +3652,10 @@ function boot({ inIframe = false } = {}) {
     if (d.type === 'chorus:preview:cancelled') {
       state.pickMode = false;
       openPanel();
+    }
+    if (d.type === 'chorus:preview:thread-open') {
+      if (!state.open) openPanel();
+      openThread(d.number);
     }
   });
 

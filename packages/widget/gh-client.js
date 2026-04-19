@@ -93,6 +93,128 @@ export const createIssueComment = (token, owner, repo, number, body) =>
     body: JSON.stringify({ body }),
   });
 
+// --- element-pinned discussion threads ------------------------------------
+//
+// Threads are GitHub issues with a 'chorus:thread' label. Element metadata
+// (selector, text, page path, bounding box) is embedded in the issue body
+// inside an HTML-comment block so it's machine-readable but invisible on
+// github.com. Replies are ordinary issue comments.
+//
+// Promoting a thread to a ticket = remove the label, add any ticket-side
+// metadata, and trigger the AI flow against a new branch.
+
+const THREAD_LABEL = 'chorus:thread';
+const THREAD_META_OPEN = '<!-- chorus-thread-meta';
+const THREAD_META_CLOSE = '-->';
+
+export function buildThreadBody({ meta, text }) {
+  const metaBlob = typeof meta === 'string' ? meta : JSON.stringify(meta);
+  return `${THREAD_META_OPEN}\n${metaBlob}\n${THREAD_META_CLOSE}\n\n${text || ''}`.trim();
+}
+
+export function parseThreadMeta(body) {
+  if (!body) return null;
+  const open = body.indexOf(THREAD_META_OPEN);
+  if (open < 0) return null;
+  const close = body.indexOf(THREAD_META_CLOSE, open);
+  if (close < 0) return null;
+  const raw = body.slice(open + THREAD_META_OPEN.length, close).trim();
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+export function stripThreadMeta(body) {
+  if (!body) return '';
+  const open = body.indexOf(THREAD_META_OPEN);
+  if (open < 0) return body;
+  const close = body.indexOf(THREAD_META_CLOSE, open);
+  if (close < 0) return body;
+  return (body.slice(0, open) + body.slice(close + THREAD_META_CLOSE.length)).trim();
+}
+
+// List open discussion threads for this repo. Uses GitHub's label filter.
+// Optionally narrow to a specific page path — filtering is client-side
+// because the path lives in the body metadata, not a label.
+export async function listDiscussionThreads(token, owner, repo, { page, state = 'open' } = {}) {
+  const qs = new URLSearchParams();
+  qs.set('labels', THREAD_LABEL);
+  qs.set('state', state);
+  qs.set('per_page', '100');
+  const issues = await gh(token, `/repos/${owner}/${repo}/issues?${qs.toString()}`);
+  // Filter out pull requests (GitHub returns PRs in /issues too).
+  const threads = issues.filter((i) => !i.pull_request).map((i) => {
+    const meta = parseThreadMeta(i.body || '');
+    return {
+      number: i.number,
+      title: i.title,
+      state: i.state,
+      html_url: i.html_url,
+      user: i.user,
+      comments: i.comments,
+      created_at: i.created_at,
+      updated_at: i.updated_at,
+      meta,
+      initialText: stripThreadMeta(i.body || ''),
+    };
+  });
+  if (!page) return threads;
+  return threads.filter((t) => t.meta?.page === page);
+}
+
+// Create a new discussion thread pinned to an element. Returns the full
+// issue object (caller typically just needs .number).
+export async function createDiscussionThread(token, owner, repo, { title, text, meta }) {
+  // Ensure the label exists; GitHub silently succeeds if it already does.
+  // We don't await this — if creation races, the issue is still valid;
+  // the label just won't be attached and the thread won't show in the list
+  // until applied.
+  safeEnsureLabel(token, owner, repo, THREAD_LABEL, '4f46e5', 'Chorus element-pinned discussion');
+  return gh(token, `/repos/${owner}/${repo}/issues`, {
+    method: 'POST',
+    body: JSON.stringify({
+      title: title || 'Discussion',
+      body: buildThreadBody({ meta, text }),
+      labels: [THREAD_LABEL],
+    }),
+  });
+}
+
+// Remove the thread label so the issue becomes a regular ticket.
+// GitHub's label-removal endpoint is label-specific; we use it to avoid
+// clobbering any other labels on the issue.
+export const promoteThreadToTicket = (token, owner, repo, number) =>
+  gh(token, `/repos/${owner}/${repo}/issues/${number}/labels/${encodeURIComponent(THREAD_LABEL)}`, {
+    method: 'DELETE',
+  });
+
+// Fetch a single thread with all its comments. Shape:
+//   { issue, comments: [{id, user, body, created_at, ...}] }
+export async function getDiscussionThread(token, owner, repo, number) {
+  const [issue, comments] = await Promise.all([
+    gh(token, `/repos/${owner}/${repo}/issues/${number}`),
+    gh(token, `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`),
+  ]);
+  return {
+    issue,
+    meta: parseThreadMeta(issue.body || ''),
+    initialText: stripThreadMeta(issue.body || ''),
+    comments,
+  };
+}
+
+async function safeEnsureLabel(token, owner, repo, name, color, description) {
+  try {
+    await gh(token, `/repos/${owner}/${repo}/labels`, {
+      method: 'POST',
+      body: JSON.stringify({ name, color, description }),
+    });
+  } catch (err) {
+    // 422 = already exists, anything else we just log-and-swallow.
+    if (!String(err.message || '').includes(' 422')) {
+      console.warn('[chorus] ensureLabel', name, err?.message || err);
+    }
+  }
+}
+
 // --- tree + file reads ----------------------------------------------------
 
 // Recursive tree at a ref. Returns { sha, tree: [{path, mode, type, sha, size}] }
