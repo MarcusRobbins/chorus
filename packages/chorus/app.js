@@ -1964,13 +1964,16 @@ function boot({ inIframe = false } = {}) {
   }
 
   function buildFirstTurnPrompt(issue, description, capture, defaultBranch) {
+    const workingBranch = `feature/${slugify(state.name)}`;
     return [
       `Feature: ${state.name}`,
       `Ticket: ${description.trim()}`,
       '',
       `Issue number: ${issue.number}`,
-      `Working branch: feature/${slugify(state.name)}`,
       `Repo default branch: ${defaultBranch}`,
+      `Target branch (will be created with your changes): ${workingBranch}`,
+      '',
+      `IMPORTANT: the target branch \`${workingBranch}\` DOES NOT EXIST YET — it will be created from ${defaultBranch} when your staged writes are committed at the end. For this turn, read from \`${defaultBranch}\` (which is what list_files and read_file default to when you omit the \`ref\` argument). Do NOT pass \`ref: "${workingBranch}"\` — it will 404.`,
       captureHint(capture),
       '',
       'Use list_files first to see what is in the repo. Read relevant files, then stage changes with write_file, then call finish.',
@@ -1991,16 +1994,43 @@ function boot({ inIframe = false } = {}) {
 
   async function executeTool(name, args) {
     const workingRef = state.ai?.workingRef || 'main';
+    // The first turn runs before the feature branch exists — requests to
+    // `ref: feature/foo` 404. Rather than burn an AI turn correcting that,
+    // transparently fall back to the working ref (usually the default
+    // branch) and tell the AI what we did.
+    const tryWithFallback = async (fn, ref) => {
+      try {
+        return { value: await fn(ref) };
+      } catch (err) {
+        const is404 = String(err.message || err).includes(' 404');
+        if (!is404 || ref === workingRef) throw err;
+        const value = await fn(workingRef);
+        return { value, fellBackFrom: ref, fellBackTo: workingRef };
+      }
+    };
     if (name === 'list_files') {
       const ref = args.ref || workingRef;
-      const tree = await gh.listTree(state.token, OWNER, REPONAME, ref);
-      return (tree.tree || []).filter((e) => e.type === 'blob').map((e) => ({ path: e.path, size: e.size ?? 0 }));
+      const { value, fellBackFrom, fellBackTo } = await tryWithFallback(
+        (r) => gh.listTree(state.token, OWNER, REPONAME, r),
+        ref,
+      );
+      const files = (value.tree || []).filter((e) => e.type === 'blob').map((e) => ({ path: e.path, size: e.size ?? 0 }));
+      if (fellBackFrom) {
+        return { files, _note: `ref "${fellBackFrom}" does not exist yet; listed from "${fellBackTo}" instead` };
+      }
+      return files;
     }
     if (name === 'read_file') {
       const ref = args.ref || workingRef;
-      const content = await gh.readFile(state.token, OWNER, REPONAME, args.path, ref);
-      if (content === null) return { error: `File not found: ${args.path}` };
-      return content;
+      const { value, fellBackFrom, fellBackTo } = await tryWithFallback(
+        (r) => gh.readFile(state.token, OWNER, REPONAME, args.path, r),
+        ref,
+      );
+      if (value === null) return { error: `File not found: ${args.path}` };
+      if (fellBackFrom) {
+        return { content: value, _note: `ref "${fellBackFrom}" does not exist yet; read from "${fellBackTo}" instead` };
+      }
+      return value;
     }
     if (name === 'write_file') {
       if (typeof args.path !== 'string' || typeof args.content !== 'string') {
