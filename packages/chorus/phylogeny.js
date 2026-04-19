@@ -303,26 +303,32 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     }
   }
 
-  // Pass 3: main tip must be the rightmost thing in the diagram, with
-  // enough breathing room that no OTHER branch's label (which extends
-  // to the right of its tip dot) runs into main's own label. Compute
-  // the right-edge of the furthest non-main label, then place main
-  // clearly past it with a fixed gap.
+  // Pass 3: compute main's DISPLAY endpoint. The real merge commit on
+  // main stays at its timestamp-derived x so rejoin elbows land on it
+  // correctly. Then we extend main's line with a trailing horizontal
+  // segment to a "display tip" position past everything else — the
+  // main dot + label sit at that display tip, not on top of the last
+  // merge point. Reads as "the main branch continues past the last
+  // merge into clear space."
   const mainTipSha = mainBranch?.tipSha;
   const mainTip = mainTipSha ? commits.get(mainTipSha) : null;
+  let mainDisplayX = null;
   if (mainTip) {
-    let maxLabelRight = mainTip.x;
+    let rightBound = mainTip.x;
     for (const b of branches) {
       if (b.isMain || !b.tipSha) continue;
       const tipC = commits.get(b.tipSha);
       if (!tipC) continue;
       const display = b.name.replace(/^(feature|auto)\//, '');
       const labelRight = tipC.x + LABEL_OFFSET_PX + display.length * LABEL_EST_PX_PER_CHAR;
-      if (labelRight > maxLabelRight) maxLabelRight = labelRight;
+      if (labelRight > rightBound) rightBound = labelRight;
+      // Also account for rejoin merge-point x's (where branch elbows
+      // land on main's lane) — we want clear space past those too.
+      const mc = mergeCommitByBranch.get(b.name);
+      if (mc && mc.x > rightBound) rightBound = mc.x;
     }
-    if (maxLabelRight + MAIN_LABEL_GAP_PX > mainTip.x) {
-      mainTip.x = maxLabelRight + MAIN_LABEL_GAP_PX;
-    }
+    mainDisplayX = rightBound + MAIN_LABEL_GAP_PX;
+    if (mainDisplayX < mainTip.x) mainDisplayX = mainTip.x;
   }
 
   // Branch tip positions + rejoin paths.
@@ -374,17 +380,32 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
       ? `M ${tipCommit.x},${y} L ${tipCommit.x},${tipCommit.y}`
       : null;
 
+    // For MAIN specifically: place the tip dot + label at mainDisplayX
+    // (past all merge-points and non-main labels) and draw a trailing
+    // horizontal segment extending main's line from the real tip commit
+    // to the display position. For every other branch, behave as before.
+    let dotX, dotY, trailingPath = null;
+    if (b.isMain && mainDisplayX != null && mainDisplayX > tipCommit.x) {
+      dotX = mainDisplayX;
+      dotY = tipCommit.y;
+      trailingPath = `M ${tipCommit.x},${tipCommit.y} L ${mainDisplayX},${tipCommit.y}`;
+    } else {
+      dotX = lastOwnCommit ? lastOwnCommit.x : tipCommit.x;
+      dotY = lastOwnCommit ? lastOwnCommit.y : y;
+    }
+
     return {
       branch: b,
       commit: tipCommit,
       lastOwnCommit,
       mergeCommit,
-      x: lastOwnCommit ? lastOwnCommit.x : tipCommit.x,
-      y: lastOwnCommit ? lastOwnCommit.y : y,
+      x: dotX,
+      y: dotY,
       lane,
       mergedBack,
       rejoinPath,
       pointerPath,
+      trailingPath,
     };
   }).filter(Boolean);
 
@@ -498,6 +519,12 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
       } else if (tip.pointerPath) {
         // Fallback for pure-alias branches with no own commits: dashed stub.
         stemsHtml.push(`<path class="phy-pointer ${categoryOf(tip.branch.name)}" d="${tip.pointerPath}"/>`);
+      }
+      // Trailing stem for main — extends main's line past the real tip
+      // commit to the display position where the dot + label sit in
+      // clear space past any merge-back points.
+      if (tip.trailingPath) {
+        stemsHtml.push(`<path class="phy-stem main" d="${tip.trailingPath}"/>`);
       }
     }
     gStems.innerHTML = stemsHtml.join('');
