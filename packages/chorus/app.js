@@ -219,16 +219,6 @@ const CSS_TEXT = `
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   .settings-modal > .body { padding: 16px; gap: 14px; }
-  .settings-identity {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-weight: 400; color: var(--c-text-muted);
-    font-size: 12px;
-  }
-  .settings-identity img {
-    width: 16px; height: 16px; border-radius: 999px;
-    border: 1px solid var(--c-border);
-  }
-  .settings-identity strong { color: var(--c-text); font-weight: 500; }
 
   /* Header overflow menu dropdown */
   .menu-wrap { position: relative; }
@@ -271,6 +261,17 @@ const CSS_TEXT = `
     height: 1px; background: var(--c-border);
     margin: 4px 2px;
   }
+  .menu-identity {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px 4px;
+    font-size: 11px; color: var(--c-text-muted);
+  }
+  .menu-identity img {
+    width: 18px; height: 18px; border-radius: 999px;
+    border: 1px solid var(--c-border);
+    flex-shrink: 0;
+  }
+  .menu-identity strong { color: var(--c-text); font-weight: 500; }
   .header .back[hidden] { display: none; }
   .header .title {
     flex: 1; font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
@@ -1882,16 +1883,10 @@ function boot({ inIframe = false } = {}) {
     settingsModalEl = document.createElement('div');
     settingsModalEl.className = 'settings-backdrop';
     const actionBarHtml = settingsActions();
-    const identity = auth.isAuthed() && state.user
-      ? `<span class="settings-identity">
-           <img src="${esc(state.user.avatar_url)}" alt="" />
-           Signed in as <strong>${esc(state.user.login)}</strong>
-         </span>`
-      : '';
     settingsModalEl.innerHTML = `
       <div class="settings-modal">
         <div class="header">
-          <div class="title">Settings${identity ? ` · ${identity}` : ''}</div>
+          <div class="title">Settings</div>
           <button class="close" data-action="close-settings" title="Close">✕</button>
         </div>
         <div class="body">
@@ -1993,7 +1988,12 @@ function boot({ inIframe = false } = {}) {
           <span class="menu-check"></span>
           <span>Settings</span>
         </button>
-        ${authed ? `
+        ${authed && state.user ? `
+          <div class="menu-divider"></div>
+          <div class="menu-identity">
+            <img src="${esc(state.user.avatar_url)}" alt="" />
+            <span>Signed in as <strong>${esc(state.user.login)}</strong></span>
+          </div>
           <button class="menu-item" data-action="sign-out-menu">
             <span class="menu-check"></span>
             <span>Sign out</span>
