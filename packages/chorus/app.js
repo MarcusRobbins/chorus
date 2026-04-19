@@ -730,6 +730,21 @@ const CSS_TEXT = `
   .phy-tip-label:hover { fill: var(--c-text); text-decoration: underline; }
 
 
+  /* AI session model picker — compact variant of label.field. */
+  .ai-model-picker {
+    flex-direction: row; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--c-text-faint);
+    padding: 6px 10px;
+    background: var(--c-bg-subtle);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+  }
+  .ai-model-picker select {
+    flex: 1; margin-left: auto;
+    padding: 3px 6px; font-size: 12px;
+    min-width: 120px;
+  }
+
   /* Skeleton loader — shimmer effect for loading states. */
   .skeleton {
     background: linear-gradient(90deg,
@@ -2817,9 +2832,26 @@ function boot({ inIframe = false } = {}) {
     const captureText = capture
       ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
       : 'nothing selected';
-    const modelInUse = state.openaiModel || DEFAULT_MODEL;
+    // Per-session model override. Defaults to the settings default; user
+    // can flip within a session to try a different model without changing
+    // their persistent default.
+    const sessionModel = s.model || state.openaiModel || DEFAULT_MODEL;
+    const isCustom = !MODEL_OPTIONS.includes(sessionModel);
+    const selectValue = isCustom ? '__custom__' : sessionModel;
     return `
-      <div class="muted-s">Model: <code>${esc(modelInUse)}</code> · <button class="link-btn" data-action="goto-settings">change</button></div>
+      <label class="field ai-model-picker">
+        Model
+        <select data-field="ai-model">
+          ${MODEL_OPTIONS.map((m) => `<option value="${esc(m)}" ${m === selectValue ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+          <option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Custom…</option>
+        </select>
+      </label>
+      ${isCustom || selectValue === '__custom__' ? `
+        <label class="field" style="margin-top:-4px;">
+          <span class="muted-s">Custom model string</span>
+          <input data-field="ai-model-custom" type="text" placeholder="e.g. gpt-5.4-turbo" value="${esc(sessionModel)}" />
+        </label>
+      ` : ''}
       ${s.summary ? `<div class="ok"><strong>Last turn:</strong> ${esc(s.summary)}</div>` : ''}
       ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}
       ${s.events?.length ? `<div class="log">${s.events.map(renderAiEvent).join('')}${s.status === 'committing' ? '<div class="log-line muted">⏳ committing…</div>' : ''}</div>` : ''}
@@ -2939,7 +2971,7 @@ function boot({ inIframe = false } = {}) {
         </div>
       </div>
       <label class="field">
-        Model
+        Default model
         <select data-field="model">
           ${MODEL_OPTIONS.map((m) => `<option value="${esc(m)}" ${m === selectValue ? 'selected' : ''}>${esc(m)}</option>`).join('')}
           <option value="__custom__" ${selectValue === '__custom__' ? 'selected' : ''}>Custom…</option>
@@ -2951,7 +2983,6 @@ function boot({ inIframe = false } = {}) {
           <input data-field="model-custom" type="text" placeholder="e.g. gpt-5.4-turbo" value="${esc(currentModel)}" />
         </label>
       ` : ''}
-      <p class="muted-s">Default is <code>${esc(DEFAULT_MODEL)}</code>. Unknown models will 404 at OpenAI.</p>
     `;
   }
   function settingsActions() {
@@ -3102,6 +3133,27 @@ function boot({ inIframe = false } = {}) {
     });
 
     // AI
+    // Per-session model picker (separate from the default in Settings)
+    const aiModelSelect = panelEl.querySelector('[data-field="ai-model"]');
+    aiModelSelect?.addEventListener('change', (e) => {
+      if (!state.ai) return;
+      const v = e.target.value;
+      if (v === '__custom__') {
+        state.ai.model = state.ai.model || state.openaiModel || DEFAULT_MODEL;
+        renderPanel();
+        panelEl?.querySelector('[data-field="ai-model-custom"]')?.focus();
+      } else {
+        state.ai.model = v;
+        renderPanel();
+      }
+    });
+    const aiModelCustom = panelEl.querySelector('[data-field="ai-model-custom"]');
+    aiModelCustom?.addEventListener('input', (e) => {
+      if (!state.ai) return;
+      const v = e.target.value.trim();
+      if (v) state.ai.model = v;
+    });
+
     const fu = panelEl.querySelector('[data-field="followup"]');
     fu?.addEventListener('input', (e) => {
       const prev = (state.ai?.followUpDraft || '').trim().length > 0;
@@ -3449,6 +3501,9 @@ function boot({ inIframe = false } = {}) {
       previewUrl: null,
       followUpDraft: '',
       error: null,
+      // Per-session model. Defaults to the user's configured default;
+      // the AI screen has a dropdown that mutates it for this session only.
+      model: state.openaiModel || DEFAULT_MODEL,
     };
     navigate('ai', { reset: true });
 
@@ -3461,7 +3516,7 @@ function boot({ inIframe = false } = {}) {
     const userPrompt = buildFirstTurnPrompt(issue, state.description, state.capture, defaultBranch);
     try {
       const result = await runAiSession({
-        apiKey: state.openaiKey, model: state.openaiModel || DEFAULT_MODEL,
+        apiKey: state.openaiKey, model: state.ai?.model || state.openaiModel || DEFAULT_MODEL,
         userPrompt,
         signal: aiAbortController.signal,
         onEvent: pushAiEvent,
@@ -3495,6 +3550,8 @@ function boot({ inIframe = false } = {}) {
       previewUrl: previewUrlFor(branch),
       followUpDraft: '',
       error: null,
+      // Per-session model; defaults to settings default, changeable inline.
+      model: state.openaiModel || DEFAULT_MODEL,
       // Rebuilt history from issue comments so the AI has context across
       // sessions (user closes tab Monday, comes back Thursday to refine).
       priorContext: '',
@@ -3552,7 +3609,7 @@ function boot({ inIframe = false } = {}) {
         ? { priorMessages: state.ai.messages, followUp: followUpWithCapture }
         : { userPrompt: buildRefinePrompt(state.ai.branch, followUpWithCapture, state.ai.priorContext || '') };
       const result = await runAiSession({
-        apiKey: state.openaiKey, model: state.openaiModel || DEFAULT_MODEL,
+        apiKey: state.openaiKey, model: state.ai?.model || state.openaiModel || DEFAULT_MODEL,
         ...runArgs,
         signal: aiAbortController.signal,
         onEvent: pushAiEvent,
