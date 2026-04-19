@@ -2016,7 +2016,7 @@ function boot({ inIframe = false } = {}) {
       : 'nothing selected';
     return `
       ${whoHtml()}
-      <p class="muted">Drop a comment pinned to an element. You can discuss it, and any reply can later trigger an AI build on its own branch.</p>
+      <p class="muted">Drop a comment pinned to an element. From inside the thread, any reply can trigger an AI build on its own branch.</p>
       <div>
         <div class="muted-s" style="margin-bottom:6px;">Selected element</div>
         <div class="${captureClass}">${esc(captureText)}</div>
@@ -2034,14 +2034,12 @@ function boot({ inIframe = false } = {}) {
     const hasElement = !!state.capture;
     const canStart = hasText && hasElement && !state.filing;
     const startLabel = state.filing ? 'Starting…' : 'Start thread';
-    const buildLabel = state.filing ? 'Starting…' : '🤖 Start & build with AI';
     return `
       <div class="secondary">
         <button data-action="pick">${state.pickMode ? 'Cancel pick' : 'Pick element'}</button>
         ${state.capture ? `<button data-action="clear-capture">Clear</button>` : ''}
-        <button data-action="start-discussion" ${canStart ? '' : 'disabled'} title="Create the thread without running AI">${startLabel}</button>
       </div>
-      <button class="primary" data-action="start-and-build" ${canStart ? '' : 'disabled'} title="Create the thread and immediately run AI on the first message">${buildLabel}</button>
+      <button class="primary" data-action="start-discussion" ${canStart ? '' : 'disabled'}>${startLabel}</button>
     `;
   }
 
