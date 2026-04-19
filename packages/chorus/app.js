@@ -176,7 +176,7 @@ const CSS_TEXT = `
       transparent 100%);
     pointer-events: none;
   }
-  .header .back, .header .close, .header .view-toggle {
+  .header .back, .header .close, .header .menu-btn {
     border: none; background: transparent; cursor: pointer;
     font-size: 15px; color: var(--c-text-muted);
     width: 26px; height: 26px; padding: 0;
@@ -184,9 +184,50 @@ const CSS_TEXT = `
     border-radius: var(--r-sm);
     transition: background var(--t-fast), color var(--t-fast);
   }
-  .header .view-toggle { width: auto; padding: 0 8px; font-size: 13px; }
-  .header .back:hover, .header .close:hover, .header .view-toggle:hover {
+  .header .back:hover, .header .close:hover, .header .menu-btn:hover {
     background: var(--c-bg-muted); color: var(--c-text);
+  }
+
+  /* Header overflow menu dropdown */
+  .menu-wrap { position: relative; }
+  .menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 200px;
+    padding: 6px;
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-xl);
+    z-index: 20;
+    display: flex; flex-direction: column;
+  }
+  .menu-section-label {
+    padding: 6px 10px 4px;
+    font-size: 10px; font-weight: 600;
+    color: var(--c-text-faint);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .menu-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; border-radius: var(--r-sm);
+    border: none; background: transparent; cursor: pointer;
+    font: inherit; font-size: 12.5px; color: var(--c-text);
+    text-align: left; width: 100%;
+    transition: background var(--t-fast);
+  }
+  .menu-item:hover { background: var(--c-bg-muted); }
+  .menu-item.checked { color: var(--c-accent); font-weight: 500; }
+  .menu-item .menu-check {
+    width: 14px; flex-shrink: 0;
+    display: inline-flex; justify-content: center;
+    color: var(--c-accent); font-weight: 600;
+    font-size: 12px;
+  }
+  .menu-divider {
+    height: 1px; background: var(--c-border);
+    margin: 4px 2px;
   }
   .header .back[hidden] { display: none; }
   .header .title {
@@ -1336,6 +1377,9 @@ function boot({ inIframe = false } = {}) {
     // Picker
     pickMode: false,
 
+    // Overflow menu (in header)
+    menuOpen: false,
+
     // Discussion threads (element-pinned comment threads)
     threads: [],               // list for current page/branch: Thread[]
     threadsLoading: false,
@@ -1558,6 +1602,25 @@ function boot({ inIframe = false } = {}) {
     resizeTimer = setTimeout(() => phylogeny?.resize(), 150);
   });
 
+  // Close the header overflow menu on outside click / Escape.
+  document.addEventListener('click', (e) => {
+    if (!state.menuOpen) return;
+    // Clicks inside the shadow root show up here with shadow-host as target
+    // in chromium — use composedPath to look for .menu-btn or .menu in the
+    // full retargeted path.
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    const insideMenu = path.some((n) => n?.classList?.contains?.('menu-wrap'));
+    if (insideMenu) return;
+    state.menuOpen = false;
+    renderPanel();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.menuOpen) {
+      state.menuOpen = false;
+      renderPanel();
+    }
+  });
+
   // When this chorus is acting as a meta-editor (auto-preview enabled on the
   // top-level page), preview iframes open in a "windowed" mode — a bordered,
   // smaller-than-viewport frame — so the inner chorus inside it lives at its
@@ -1764,21 +1827,57 @@ function boot({ inIframe = false } = {}) {
   function renderHeader() {
     const title = headerTitle();
     const canBack = state.backStack.length > 0;
-    // View-mode toggle only shows up on browse — the other screens don't
-    // have list-vs-tree variants. Icon flips to signal the OTHER mode,
-    // not the current one (it's an action, not a status indicator).
-    const showToggle = state.screen === 'browse';
-    const toggleIcon = state.viewMode === 'tree' ? '☰' : '⑂';
-    const toggleTitle = state.viewMode === 'tree' ? 'Switch to list view' : 'Switch to tree view';
+    // The header's overflow-menu button contains: view-mode toggle,
+    // settings, sign-out. Hidden on signIn / devicePending where it'd
+    // be contextually wrong (user hasn't finished auth yet).
+    const showMenu = configOK() && !['signIn', 'devicePending'].includes(state.screen);
     const el = document.createElement('div');
     el.className = 'header';
     el.innerHTML = `
       <button class="back" ${canBack ? '' : 'hidden'} data-action="back" title="Back">←</button>
       <div class="title">${title}</div>
-      ${showToggle ? `<button class="view-toggle" data-action="toggle-view" title="${toggleTitle}">${toggleIcon}</button>` : ''}
+      ${showMenu ? `
+        <div class="menu-wrap">
+          <button class="menu-btn" data-action="toggle-menu" title="Menu" aria-expanded="${state.menuOpen ? 'true' : 'false'}">☰</button>
+          ${state.menuOpen ? menuHtml() : ''}
+        </div>
+      ` : ''}
       <button class="close" data-action="close" title="Close">✕</button>
     `;
     return el;
+  }
+
+  function menuHtml() {
+    const authed = auth.isAuthed();
+    return `
+      <div class="menu">
+        <div class="menu-section-label">View</div>
+        <button class="menu-item ${state.viewMode === 'tree' ? 'checked' : ''}" data-action="set-view-tree">
+          <span class="menu-check">${state.viewMode === 'tree' ? '✓' : ''}</span>
+          <span>Phylogeny</span>
+        </button>
+        <button class="menu-item ${state.viewMode === 'list' ? 'checked' : ''}" data-action="set-view-list">
+          <span class="menu-check">${state.viewMode === 'list' ? '✓' : ''}</span>
+          <span>List</span>
+        </button>
+        <div class="menu-divider"></div>
+        <button class="menu-item" data-action="goto-settings-menu">
+          <span class="menu-check"></span>
+          <span>Settings</span>
+        </button>
+        ${authed ? `
+          <button class="menu-item" data-action="sign-out-menu">
+            <span class="menu-check"></span>
+            <span>Sign out</span>
+          </button>
+        ` : `
+          <button class="menu-item" data-action="sign-in-menu">
+            <span class="menu-check"></span>
+            <span>Sign in with GitHub</span>
+          </button>
+        `}
+      </div>
+    `;
   }
   function headerTitle() {
     if (!configOK()) return 'Chorus';
@@ -1870,7 +1969,6 @@ function boot({ inIframe = false } = {}) {
     const autos = state.branches.filter((b) => b.name.startsWith('auto/') && b !== main);
     const misc = state.branches.filter((b) => b !== main && !b.name.startsWith('feature/') && !b.name.startsWith('auto/'));
     return `
-      ${whoHtml()}
       <p class="muted">Pick a branch to see its preview, discussion, and AI history — or suggest a new change.</p>
       ${state.branchesError ? `<div class="err">${esc(state.branchesError)}</div>` : ''}
       ${state.branchesLoading && !state.branches.length ? `
@@ -1892,7 +1990,6 @@ function boot({ inIframe = false } = {}) {
   // auth status + quick actions. Click a tip on the phylogeny to navigate.
   function browseTreeHtml() {
     return `
-      ${whoHtml()}
       ${state.branchesError ? `<div class="err">${esc(state.branchesError)}</div>` : ''}
       ${state.branchesLoading && !state.branches.length ? `
         <div class="skeleton" style="height:80px;"></div>
@@ -2015,7 +2112,6 @@ function boot({ inIframe = false } = {}) {
       ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
       : 'nothing selected';
     return `
-      ${whoHtml()}
       <p class="muted">Drop a comment pinned to an element. From inside the thread, any reply can trigger an AI build on its own branch.</p>
       <div>
         <div class="muted-s" style="margin-bottom:6px;">Selected element</div>
@@ -2050,7 +2146,6 @@ function boot({ inIframe = false } = {}) {
     const branch = state.featureBranch;
     const isMain = branch === 'main' || branch === 'master';
     return `
-      ${whoHtml()}
       ${state.featureMergeStatus === 'pending' ? `<div class="muted-s">Merging to main…</div>` : ''}
       ${state.featureMergeStatus?.ok ? `<div class="ok">Merged as <code>${esc(state.featureMergeStatus.sha.slice(0, 7))}</code>. Related issues closed.</div>` : ''}
       ${state.featureMergeStatus?.error ? `<div class="err">${esc(state.featureMergeStatus.error)}</div>` : ''}
@@ -2141,7 +2236,6 @@ function boot({ inIframe = false } = {}) {
     const loading = state.threadsLoading && !state.threads.length;
     const empty = !loading && !state.threads.length;
     return `
-      ${whoHtml()}
       <p class="muted">Discussion threads on this page. Each is pinned to an element you can click back into.</p>
       ${state.threadsError ? `<div class="err">${esc(state.threadsError)}</div>` : ''}
       ${loading ? `<div class="skeleton" style="height:60px;"></div><div class="skeleton" style="height:60px;"></div>` : ''}
@@ -2201,7 +2295,6 @@ function boot({ inIframe = false } = {}) {
     const pageStr = meta.page ? `<div class="muted-s">on <code>${esc(meta.page)}</code></div>` : '';
     const comments = t.comments || [];
     return `
-      ${whoHtml()}
       <div class="thread-pin">
         <div class="thread-pin-dot"></div>
         <div>
@@ -2753,11 +2846,32 @@ function boot({ inIframe = false } = {}) {
     // Header
     on('[data-action="back"]', 'click', goBack);
     on('[data-action="close"]', 'click', closePanel);
-    on('[data-action="toggle-view"]', 'click', () => {
-      state.viewMode = state.viewMode === 'tree' ? 'list' : 'tree';
-      storeSave('viewMode', state.viewMode);
+    // Overflow menu toggle + items
+    on('[data-action="toggle-menu"]', 'click', (e) => {
+      e.stopPropagation();
+      state.menuOpen = !state.menuOpen;
       renderPanel();
-      renderPhylogeny(); // toggle band visibility
+    });
+    const setView = (mode) => {
+      state.viewMode = mode;
+      storeSave('viewMode', mode);
+      state.menuOpen = false;
+      renderPanel();
+      renderPhylogeny();
+    };
+    on('[data-action="set-view-tree"]', 'click', () => setView('tree'));
+    on('[data-action="set-view-list"]', 'click', () => setView('list'));
+    on('[data-action="goto-settings-menu"]', 'click', () => {
+      state.menuOpen = false;
+      navigate('settings');
+    });
+    on('[data-action="sign-in-menu"]', 'click', () => {
+      state.menuOpen = false;
+      startDeviceFlow();
+    });
+    on('[data-action="sign-out-menu"]', 'click', () => {
+      state.menuOpen = false;
+      signOut();
     });
 
     // Browse (list view)
