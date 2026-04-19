@@ -62,9 +62,13 @@ const CSS_TEXT = `
 
     --t-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1);
     --t-med:  220ms cubic-bezier(0.4, 0, 0.2, 1);
+    --t-spring: 280ms cubic-bezier(0.34, 1.3, 0.64, 1);
 
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --grad-primary: linear-gradient(180deg, #1a1a1e 0%, #0a0a0a 100%);
+    --grad-accent:  linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
   }
   * {
     box-sizing: border-box;
@@ -72,40 +76,64 @@ const CSS_TEXT = `
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  /* Custom scrollbars — subtle, don't fight the design. */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--c-text-faint) 50%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--c-text-muted) 60%, transparent);
+    background-clip: content-box;
+  }
+  /* Selection colour — indigo with low alpha. */
+  ::selection { background: color-mix(in srgb, var(--c-accent) 25%, transparent); }
 
   /* ── Trigger pill (collapsed) ────────────────────────────── */
   .trigger {
     position: fixed; bottom: 20px; right: 20px;
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 9px 14px 9px 12px; border-radius: 999px;
-    background: var(--c-text); color: var(--c-bg); border: none;
-    box-shadow: var(--shadow-lg);
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 10px 16px 10px 13px; border-radius: 999px;
+    background: var(--grad-primary);
+    color: var(--c-bg); border: none;
+    box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255,255,255,0.08);
     font-size: 13px; font-weight: 500; letter-spacing: -0.005em;
     cursor: pointer; pointer-events: auto;
-    transition: transform var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
+    transition: transform var(--t-spring), box-shadow var(--t-med);
     max-width: 340px;
   }
   .trigger:hover {
-    background: #1f1f23;
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-xl);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-xl), inset 0 1px 0 rgba(255,255,255,0.1);
   }
-  .trigger:active { transform: translateY(0); }
+  .trigger:active { transform: translateY(0); transition-duration: 80ms; }
   .trigger .dot {
     width: 8px; height: 8px; border-radius: 999px;
     background: var(--c-text-faint); flex-shrink: 0;
-    transition: background var(--t-fast);
+    transition: background var(--t-fast), box-shadow var(--t-fast);
+    position: relative;
   }
   .trigger .dot.authed {
     background: var(--c-success);
-    box-shadow: 0 0 0 2px rgba(5,150,105,0.2);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-success) 25%, transparent);
   }
   .trigger .dot.working {
     background: var(--c-warning);
-    animation: pulse 1.2s ease-in-out infinite;
+    animation: working-pulse 1.6s ease-in-out infinite;
   }
   .trigger .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }
+  @keyframes working-pulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-warning) 0%, transparent);
+    }
+    50% {
+      box-shadow: 0 0 0 6px color-mix(in srgb, var(--c-warning) 30%, transparent);
+    }
+  }
 
   /* ── Panel shell ─────────────────────────────────────────── */
   .panel {
@@ -131,10 +159,22 @@ const CSS_TEXT = `
   /* ── Header ──────────────────────────────────────────────── */
   .header {
     display: flex; align-items: center; gap: 6px;
-    padding: 12px 14px;
+    padding: 12px 14px 12px 16px;
+    background: linear-gradient(180deg, var(--c-bg) 0%, var(--c-bg-subtle) 100%);
     border-bottom: 1px solid var(--c-border);
-    background: var(--c-bg-subtle);
     flex-shrink: 0;
+    position: relative;
+  }
+  /* Hairline accent under header — subtle, adds weight without a bar. */
+  .header::after {
+    content: '';
+    position: absolute; left: 16px; right: 16px; bottom: -1px;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--c-accent) 30%, transparent) 50%,
+      transparent 100%);
+    pointer-events: none;
   }
   .header .back, .header .close, .header .view-toggle {
     border: none; background: transparent; cursor: pointer;
@@ -201,36 +241,48 @@ const CSS_TEXT = `
     background: var(--c-bg); border: 1px solid var(--c-border); color: var(--c-text);
     font: inherit; font-size: 12px; font-weight: 500;
     cursor: pointer;
-    padding: 6px 10px; border-radius: var(--r-sm);
-    transition: background var(--t-fast), border-color var(--t-fast);
+    padding: 6px 12px; border-radius: var(--r-sm);
+    box-shadow: var(--shadow-sm);
+    transition: background var(--t-fast), border-color var(--t-fast),
+                transform var(--t-fast), box-shadow var(--t-fast);
   }
   .action-bar .secondary button:hover {
-    background: var(--c-bg-muted); border-color: var(--c-border-strong);
+    background: var(--c-bg-subtle); border-color: var(--c-border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+  .action-bar .secondary button:active {
+    transform: translateY(0); box-shadow: var(--shadow-sm);
   }
   .action-bar .primary {
     font: inherit; font-size: 13px; font-weight: 500;
     letter-spacing: -0.005em;
-    padding: 8px 16px; border-radius: var(--r-sm);
+    padding: 8px 18px; border-radius: var(--r-sm);
     cursor: pointer;
-    background: var(--c-text); color: var(--c-bg); border: 1px solid var(--c-text);
-    box-shadow: var(--shadow-sm);
-    transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+    background: var(--grad-primary); color: var(--c-bg);
+    border: 1px solid var(--c-text);
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.08);
+    transition: transform var(--t-fast), box-shadow var(--t-fast);
   }
   .action-bar .primary:hover:not(:disabled) {
-    background: #1f1f23;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,0.12);
+    transform: translateY(-1px);
   }
-  .action-bar .primary:active:not(:disabled) { transform: translateY(1px); }
+  .action-bar .primary:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
   .action-bar .primary:disabled {
     background: var(--c-bg-muted); color: var(--c-text-faint);
     border-color: var(--c-border); box-shadow: none;
     cursor: default;
   }
   .action-bar .primary.green {
-    background: var(--c-success); border-color: var(--c-success); color: var(--c-bg);
+    background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+    border-color: #047857; color: var(--c-bg);
   }
   .action-bar .primary.green:hover:not(:disabled) {
-    background: #047857; border-color: #047857;
+    background: linear-gradient(180deg, #059669 0%, #047857 100%);
   }
 
   /* ── Form controls ───────────────────────────────────────── */
@@ -295,14 +347,25 @@ const CSS_TEXT = `
 
   /* In-panel tree-view intro card (phylogeny itself is in the band) */
   .tree-hint {
+    display: flex; align-items: flex-start; gap: 12px;
     padding: 14px;
-    background: var(--c-accent-bg);
+    background: linear-gradient(135deg,
+      var(--c-accent-bg) 0%,
+      color-mix(in srgb, var(--c-accent-bg) 50%, var(--c-bg)) 100%);
     border: 1px solid color-mix(in srgb, var(--c-accent) 20%, transparent);
     border-radius: var(--r-md);
   }
+  .tree-hint-mark {
+    width: 18px; height: 18px; border-radius: 999px;
+    background: var(--grad-accent);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18),
+                0 0 0 3px color-mix(in srgb, var(--c-accent) 15%, transparent);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
   .tree-hint-title {
     font-weight: 600; color: var(--c-accent-fg);
-    font-size: 13px; margin-bottom: 4px;
+    font-size: 13px; margin-bottom: 2px;
     letter-spacing: -0.01em;
   }
 
@@ -457,28 +520,62 @@ const CSS_TEXT = `
   .phylogeny-host.active { display: block; }
   .phylogeny-header {
     position: absolute; top: 0; left: 0; right: 0;
-    padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; display: flex; align-items: center; gap: 10px;
     font-size: 11px; color: var(--c-text-muted);
     font-family: var(--font-sans);
     border-bottom: 1px solid var(--c-border);
-    background: var(--c-bg-subtle);
+    background: linear-gradient(180deg, var(--c-bg) 0%, var(--c-bg-subtle) 100%);
     z-index: 2;
+    position: absolute;
+  }
+  /* Hairline indigo accent under phylogeny header — matches panel. */
+  .phylogeny-header::after {
+    content: '';
+    position: absolute; left: 14px; right: 14px; bottom: -1px;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--c-accent) 30%, transparent) 50%,
+      transparent 100%);
+    pointer-events: none;
+  }
+  .phylogeny-header .mark {
+    width: 16px; height: 16px; border-radius: 999px;
+    background: var(--grad-accent);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15),
+                0 0 0 2px color-mix(in srgb, var(--c-accent) 15%, transparent);
+    flex-shrink: 0;
   }
   .phylogeny-header .title {
     font-weight: 600; color: var(--c-text);
     font-size: 12px; letter-spacing: -0.01em;
   }
-  .phylogeny-header .count { color: var(--c-text-faint); font-family: var(--font-mono); font-size: 11px; }
-  .phylogeny-header .loading { color: var(--c-accent); font-style: italic; }
+  .phylogeny-header .count {
+    color: var(--c-text-faint); font-family: var(--font-mono); font-size: 10.5px;
+    padding: 2px 7px; border-radius: var(--r-xs);
+    background: var(--c-bg-muted);
+  }
+  .phylogeny-header .loading {
+    color: var(--c-accent); font-style: italic;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .phylogeny-header .loading::before {
+    content: ''; width: 8px; height: 8px; border-radius: 999px;
+    background: var(--c-accent);
+    animation: working-pulse 1.4s ease-in-out infinite;
+  }
   .phylogeny-header .phy-reset {
     margin-left: auto;
     border: 1px solid var(--c-border); background: var(--c-bg); color: var(--c-text);
     font: inherit; font-size: 11px; font-weight: 500;
-    padding: 4px 9px; border-radius: var(--r-sm); cursor: pointer;
-    transition: background var(--t-fast), border-color var(--t-fast);
+    padding: 4px 10px; border-radius: var(--r-sm); cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background var(--t-fast), border-color var(--t-fast),
+                transform var(--t-fast), box-shadow var(--t-fast);
   }
   .phylogeny-header .phy-reset:hover {
-    background: var(--c-bg-muted); border-color: var(--c-border-strong);
+    background: var(--c-bg-subtle); border-color: var(--c-border-strong);
+    transform: translateY(-1px); box-shadow: var(--shadow-md);
   }
   .phylogeny-body {
     position: absolute; top: 40px; left: 0; right: 0; bottom: 0;
@@ -548,6 +645,21 @@ const CSS_TEXT = `
   .phy-tip-label.merged-back { opacity: 0.6; font-style: italic; }
   .phy-tip-label:hover { fill: var(--c-text); text-decoration: underline; }
 
+
+  /* Skeleton loader — shimmer effect for loading states. */
+  .skeleton {
+    background: linear-gradient(90deg,
+      var(--c-bg-muted) 0%,
+      color-mix(in srgb, var(--c-bg-muted) 50%, var(--c-bg)) 50%,
+      var(--c-bg-muted) 100%);
+    background-size: 200% 100%;
+    border-radius: var(--r-sm);
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 
   /* Inline link-style buttons (used in header strips etc.) */
   .link-btn {
@@ -1153,10 +1265,11 @@ function boot({ inIframe = false } = {}) {
   function updatePhyHeader(status) {
     const counts = phyData ? `${phyData.branches.length} branches · ${phyData.commits.size} commits` : '';
     phyHeader.innerHTML = `
+      <span class="mark" aria-hidden="true"></span>
       <span class="title">Phylogeny</span>
-      <span class="count">${esc(counts)}</span>
+      ${counts ? `<span class="count">${esc(counts)}</span>` : ''}
       ${status ? `<span class="loading">${esc(status)}</span>` : ''}
-      <button class="phy-reset" title="Reset view (fit all)">⟲ fit</button>
+      <button class="phy-reset" title="Reset view (fit all)">Fit view</button>
     `;
     phyHeader.querySelector('.phy-reset')?.addEventListener('click', () => {
       phylogeny?.resetView();
@@ -1519,7 +1632,13 @@ function boot({ inIframe = false } = {}) {
       ${whoHtml()}
       <p class="muted">Pick a branch to see its preview, discussion, and AI history — or suggest a new change.</p>
       ${state.branchesError ? `<div class="err">${esc(state.branchesError)}</div>` : ''}
-      ${state.branchesLoading && !state.branches.length ? `<div class="muted-s">Loading branches…</div>` : ''}
+      ${state.branchesLoading && !state.branches.length ? `
+        <div class="branch-list">
+          <div class="skeleton" style="height:34px;margin:2px 0;"></div>
+          <div class="skeleton" style="height:34px;margin:2px 0;width:88%;"></div>
+          <div class="skeleton" style="height:34px;margin:2px 0;width:92%;"></div>
+        </div>
+      ` : ''}
       ${main ? `<div class="branch-list">${branchItem(main, 'main')}</div>` : ''}
       ${features.length ? `<div class="section-heading">Features</div><div class="branch-list">${features.map((b) => branchItem(b, 'feature')).join('')}</div>` : ''}
       ${autos.length ? `<div class="section-heading">Auto branches</div><div class="branch-list">${autos.map((b) => branchItem(b, 'auto')).join('')}</div>` : ''}
@@ -1534,10 +1653,15 @@ function boot({ inIframe = false } = {}) {
     return `
       ${whoHtml()}
       ${state.branchesError ? `<div class="err">${esc(state.branchesError)}</div>` : ''}
-      ${state.branchesLoading && !state.branches.length ? `<div class="muted-s">Loading branches…</div>` : ''}
+      ${state.branchesLoading && !state.branches.length ? `
+        <div class="skeleton" style="height:80px;"></div>
+      ` : ''}
       <div class="tree-hint">
-        <div class="tree-hint-title">🌿 Phylogeny below</div>
-        <p class="muted-s">Click a branch on the tree to explore it, or sprout a new one.</p>
+        <div class="tree-hint-mark" aria-hidden="true"></div>
+        <div>
+          <div class="tree-hint-title">Phylogeny below</div>
+          <p class="muted-s">Click a branch on the tree to explore, or sprout a new one.</p>
+        </div>
       </div>
     `;
   }
