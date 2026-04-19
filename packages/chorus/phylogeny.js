@@ -239,42 +239,23 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     c.y = yScale(c.lane);
   }
 
-  // Per-lane min-spacing. Commits whose timestamps are close together
-  // would otherwise produce elbow corners stacked on top of each other —
-  // making independent branches look like they're related (e.g. test5
-  // appearing to branch off menu just because its divergence timestamp
-  // is near menu's merge timestamp). Walk each lane left-to-right and
-  // nudge commits forward so no two are within MIN_COMMIT_DX of each
-  // other on the same lane. This distorts the time scale slightly for
-  // clustered regions but keeps topology legible.
+  // Layout spacing.
   //
-  // Elbow corners (divergence + rejoin) inherit the nudged x values
-  // automatically because they're derived from commit.x at render time.
-  const MIN_COMMIT_DX = 28;
-  const byLane = new Map();
-  for (const c of commits.values()) {
-    if (!byLane.has(c.lane)) byLane.set(c.lane, []);
-    byLane.get(c.lane).push(c);
-  }
-  for (const laneCommits of byLane.values()) {
-    laneCommits.sort((a, b) => a.x - b.x);
-    for (let i = 1; i < laneCommits.length; i++) {
-      const prev = laneCommits[i - 1];
-      const curr = laneCommits[i];
-      if (curr.x - prev.x < MIN_COMMIT_DX) {
-        curr.x = prev.x + MIN_COMMIT_DX;
-      }
-    }
-  }
-
-  // Second pass: divergence points across lanes. A "divergence point" is
-  // a commit whose primary parent lives on a different lane — its elbow
-  // corner drops vertically through main's lane at that x. Two branches
-  // diverging at similar timestamps end up with verticals stacked on top
-  // of each other, making one look like it branched off the other. Nudge
-  // divergence commits apart globally so their elbow verticals don't
-  // collide.
+  // Two issues to avoid:
+  //   (a) two branches diverging at close timestamps produce elbow
+  //       verticals stacked at the same x — one looks like it branched
+  //       off the other.
+  //   (b) independent commits on a lane at close timestamps overlap.
+  //
+  // Pass order matters. Divergence first (these are the cross-lane
+  // anchors and set critical x values that other commits will work
+  // around). Then per-lane — sorted by TIMESTAMP not by current x, so
+  // topological order is always preserved even when a divergence nudge
+  // has moved a branch's first commit forward.
   const MIN_DIVERGENCE_DX = 40;
+  const MIN_COMMIT_DX = 28;
+
+  // Pass 1: divergence points (cross-lane).
   const divergencePoints = [];
   for (const c of commits.values()) {
     const p1 = c.parents[0] && commits.get(c.parents[0]);
@@ -286,6 +267,39 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     const curr = divergencePoints[i];
     if (curr.x - prev.x < MIN_DIVERGENCE_DX) {
       curr.x = prev.x + MIN_DIVERGENCE_DX;
+    }
+  }
+
+  // Pass 2: per-lane, sorted by timestamp so a child never ends up at a
+  // smaller x than its parent (which would draw the stem backward).
+  // Each subsequent commit is clamped to max(current x, prev.x + min).
+  const byLane = new Map();
+  for (const c of commits.values()) {
+    if (!byLane.has(c.lane)) byLane.set(c.lane, []);
+    byLane.get(c.lane).push(c);
+  }
+  for (const laneCommits of byLane.values()) {
+    laneCommits.sort((a, b) => a.timestamp - b.timestamp);
+    for (let i = 1; i < laneCommits.length; i++) {
+      const prev = laneCommits[i - 1];
+      const curr = laneCommits[i];
+      const minAllowed = prev.x + MIN_COMMIT_DX;
+      if (curr.x < minAllowed) curr.x = minAllowed;
+    }
+  }
+
+  // Pass 3: main tip must be the rightmost thing in the diagram. Any
+  // commit that got nudged past main's tip x shifts main's tip forward
+  // so the label + dot always sit at the right edge.
+  const mainTipSha = mainBranch?.tipSha;
+  const mainTip = mainTipSha ? commits.get(mainTipSha) : null;
+  if (mainTip) {
+    let maxX = mainTip.x;
+    for (const c of commits.values()) {
+      if (c.sha !== mainTip.sha && c.x > maxX) maxX = c.x;
+    }
+    if (maxX > mainTip.x) {
+      mainTip.x = maxX + MIN_COMMIT_DX;
     }
   }
 
