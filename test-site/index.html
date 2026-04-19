@@ -38,9 +38,15 @@
   <div id="boot-status">Booting…</div>
   <div id="root"></div>
 
-  <!-- Single inline loader. Cache-busts bootstrap + chorus on every reload, so
-       AI commits are reflected immediately in branch previews. Chorus loads
-       via RELATIVE path so the branch's version of the tool is what runs. -->
+  <!-- Inline loader with SHA-pinned chorus.
+       Bootstrap loads relatively (it's the test-site's own compiler). Chorus
+       is fetched via jsDelivr pinned to the latest `main` commit SHA — that
+       URL form is immutable-cached, so chorus pushes go live immediately
+       instead of waiting for GitHub Pages' Fastly cache to roll. Falls back
+       to the relative github.io path if the GitHub API is rate-limited.
+       When this page is viewed INSIDE a preview iframe (chorus-on-chorus),
+       the relative fallback is actually what we want — it loads chorus from
+       the branch's own tree at rawcdn.githack, which is immutable too. -->
   <script>
     (function () {
       var cb = new URL(location.href).searchParams.get('t') || Date.now().toString(36);
@@ -50,23 +56,44 @@
       bs.src = './bootstrap.js?_cb=' + cb;
       document.body.appendChild(bs);
 
-      var ch = document.createElement('script');
-      ch.type = 'module';
-      ch.id = 'chorus';
-      ch.src = '../packages/chorus/app.js?_cb=' + cb;
-      ch.setAttribute('data-github-client-id', 'Ov23lijbc9rZ5Vi9o9F2');
-      ch.setAttribute('data-github-repo', 'MarcusRobbins/chorus');
-      ch.setAttribute('data-github-auth-proxy', 'https://chorus-auth-proxy.marcusrobbins58.workers.dev');
-      // Leaving data-openai-model unset lets chorus use its own default
-      // (currently gpt-5.4). Users can override in Settings → Model.
-      ch.setAttribute('data-preview-mode', 'full');
-      ch.setAttribute('data-auto-preview', 'true');
-      // data-chorus-meta: tells chorus this is the chorus-on-chorus demo, so
-      // the preview iframe stays windowed always (outer + inner pills can
-      // both show at their own bottom-right without colliding).
-      ch.setAttribute('data-chorus-meta', 'true');
-      ch.setAttribute('data-debug', 'true');
-      document.body.appendChild(ch);
+      function loadChorus(src) {
+        var ch = document.createElement('script');
+        ch.type = 'module';
+        ch.id = 'chorus';
+        ch.src = src;
+        ch.setAttribute('data-github-client-id', 'Ov23lijbc9rZ5Vi9o9F2');
+        ch.setAttribute('data-github-repo', 'MarcusRobbins/chorus');
+        ch.setAttribute('data-github-auth-proxy', 'https://chorus-auth-proxy.marcusrobbins58.workers.dev');
+        ch.setAttribute('data-preview-mode', 'full');
+        ch.setAttribute('data-auto-preview', 'true');
+        ch.setAttribute('data-chorus-meta', 'true');
+        ch.setAttribute('data-debug', 'true');
+        document.body.appendChild(ch);
+      }
+
+      var inIframe = window !== window.top;
+      if (inIframe) {
+        // Inside the preview iframe: load via relative path so chorus comes
+        // from the iframe's branch (rawcdn.githack, SHA-pinned, immutable).
+        loadChorus('../packages/chorus/app.js?_cb=' + cb);
+        return;
+      }
+
+      // Top-level: resolve latest chorus main SHA, load from jsDelivr@SHA
+      // (immutable). Fall back to the relative github.io path if the API
+      // call fails (rate limit etc.).
+      fetch('https://api.github.com/repos/MarcusRobbins/chorus/commits/main', {
+        headers: { 'Accept': 'application/vnd.github+json' },
+      })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (d) {
+          var sha = d && d.sha;
+          if (!sha) throw new Error('no sha');
+          loadChorus('https://cdn.jsdelivr.net/gh/MarcusRobbins/chorus@' + sha + '/packages/chorus/app.js');
+        })
+        .catch(function () {
+          loadChorus('../packages/chorus/app.js?_cb=' + cb);
+        });
     })();
   </script>
 </body>
