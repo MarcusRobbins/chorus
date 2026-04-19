@@ -121,24 +121,31 @@ export async function loadPhylogenyData({ token, owner, repo, branches, gh }) {
 // branchPath, mergeEdges, lane, pickBranch}.
 
 function computeLayout({ commits, branches, mainName }, { width, height }) {
-  // "pickBranch" — the lane this commit should render on.
-  //
-  // Naive 'first ref wins' is wrong: after a /merges call, main reaches
-  // every commit on the merged branch via the merge commit's second
-  // parent, so those commits have {main, feature/x} in their refs. If we
-  // pick main, the branch has no own-lane commits and the rejoin curve
-  // has nothing to anchor to.
-  //
-  // Correct definition: a commit is 'on main' if and only if it's reachable
-  // from main by walking FIRST PARENTS only. That's main's trunk — the
-  // continuous mainline of development. Merge commits' second parents
-  // (which are the merged-in branches' tips) are NOT on the trunk, so they
-  // stay on their own branch's lane and the rejoin curve draws cleanly.
+  // Reachability: for each branch, which commits in our map can we walk
+  // to via ANY parent pointer starting from the branch tip. BFS bounded
+  // by commits we've actually fetched.
+  function reachableFrom(tipSha) {
+    const seen = new Set();
+    if (!tipSha) return seen;
+    const stack = [tipSha];
+    while (stack.length) {
+      const sha = stack.pop();
+      if (seen.has(sha)) continue;
+      const c = commits.get(sha);
+      if (!c) continue;
+      seen.add(sha);
+      for (const p of c.parents) stack.push(p);
+    }
+    return seen;
+  }
+
+  // Main's 'trunk' = first-parent-only walk from main's tip. Commits
+  // reached via merge commits' SECOND parents are NOT on the trunk
+  // (they're the branch that was merged in).
   const mainBranch = branches.find((b) => b.name === mainName);
   const mainTrunk = new Set();
   if (mainBranch?.tipSha) {
     let cursor = mainBranch.tipSha;
-    // Defensive: cap iterations so a cycle can't loop us forever.
     let safety = 10000;
     while (cursor && !mainTrunk.has(cursor) && safety-- > 0) {
       mainTrunk.add(cursor);
@@ -146,15 +153,49 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
       cursor = c?.parents?.[0] || null;
     }
   }
+
+  // commitsByBranch[name] = commits introduced by this branch (reachable
+  // from tip but not on main's trunk).
+  const commitsByBranch = new Map();
+  for (const b of branches) {
+    if (b.isMain) continue;
+    const reach = reachableFrom(b.tipSha);
+    const own = new Set();
+    for (const sha of reach) if (!mainTrunk.has(sha)) own.add(sha);
+    commitsByBranch.set(b.name, own);
+  }
+
   const nonMainNames = branches.filter((b) => !b.isMain).map((b) => b.name);
   for (const c of commits.values()) {
     if (mainTrunk.has(c.sha)) {
       c.pickBranch = mainName;
     } else {
-      // Not on main's trunk — pick the first non-main branch that has it
-      // in its reachable set. Fall back to main if somehow on nothing.
-      c.pickBranch = nonMainNames.find((bn) => c.refs.has(bn)) || mainName;
+      // First branch whose 'own' set contains this commit.
+      c.pickBranch = nonMainNames.find((bn) => commitsByBranch.get(bn)?.has(c.sha)) || mainName;
     }
+  }
+
+  // For each non-main branch: did it get merged back into main, and if so,
+  // which commit on main's trunk is the merge commit? We look for a merge
+  // commit on main's trunk whose second-parent subtree contains the
+  // branch's tip.
+  const mergeCommitByBranch = new Map();
+  for (const b of branches) {
+    if (b.isMain || !b.tipSha) continue;
+    // Walk main's trunk, for each merge commit check if parents[1] can
+    // reach the branch's tip.
+    let found = null;
+    for (const sha of mainTrunk) {
+      const c = commits.get(sha);
+      if (!c || c.parents.length < 2) continue;
+      const reachFromSecondary = reachableFrom(c.parents[1]);
+      if (reachFromSecondary.has(b.tipSha)) {
+        // Pick the OLDEST such merge commit (the one closest to the branch
+        // tip in time) — that's the actual 'when it rejoined main' point.
+        if (!found || c.timestamp < found.timestamp) found = c;
+      }
+    }
+    if (found) mergeCommitByBranch.set(b.name, found);
   }
 
   // Lane assignment: main at the bottom (visual "trunk / foundation"),
@@ -198,61 +239,62 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     c.y = yScale(c.lane);
   }
 
-  // Branch tip positions — each branch gets its OWN lane for its tip dot +
-  // label, even if the underlying commit lives on another branch's lane.
-  // When the branch's tip sits on a different lane (its tip commit is
-  // currently reachable from main — a merge-back has happened), we
-  // compute a "merge-back" arc from the branch's last own commit curving
-  // down into main at the tip's position. This reads as a rejoin flow
-  // rather than a terminal state; the branch could sprout new commits
-  // tomorrow and the arc just moves.
+  // Branch tip positions + rejoin paths.
+  // A branch is "merged back" if main's trunk contains a merge commit
+  // whose second-parent subtree reaches this branch's tip. The rejoin is
+  // drawn as a right-angle elbow (matching the stem style) from the
+  // branch's last own commit → horizontally to the merge commit's x →
+  // vertically down to main's lane. Minimum horizontal extent enforced so
+  // the elbow reads even when the merge happened seconds after the last
+  // branch commit (and would otherwise collapse to a vertical line).
   const branchTipPositions = branches.map((b) => {
     const tipCommit = commits.get(b.tipSha);
     if (!tipCommit) return null;
     const lane = lanes.get(b.name) ?? 0;
     const y = yScale(lane);
-    const mergedBack = tipCommit.pickBranch !== b.name; // tip commit belongs to someone else's lane
-    // The branch's last commit on its own lane (most recent). If the
-    // branch has no own commits — e.g., it never actually diverged from
-    // main — lastOwnCommit is null and we degrade to a dashed stub.
+
+    // Last own commit = most recent commit in commitsByBranch[name].
+    const ownSet = commitsByBranch.get(b.name);
     let lastOwnCommit = null;
-    if (mergedBack) {
+    if (ownSet && ownSet.size) {
       let latestTs = -Infinity;
-      for (const c of commits.values()) {
-        if (c.pickBranch === b.name && c.timestamp.getTime() > latestTs) {
+      for (const sha of ownSet) {
+        const c = commits.get(sha);
+        if (c && c.timestamp.getTime() > latestTs) {
           latestTs = c.timestamp.getTime();
           lastOwnCommit = c;
         }
       }
     }
-    // Build the rejoin curve: cubic Bezier from lastOwnCommit (on branch
-    // lane) to tipCommit (on main lane). Control points flare horizontally
-    // so the curve has some slack instead of a hard diagonal.
+    const mergeCommit = mergeCommitByBranch.get(b.name) || null;
+    const mergedBack = !!mergeCommit || (!ownSet?.size && !b.isMain && mainTrunk.has(b.tipSha));
+
+    // Right-angle rejoin elbow (replaces the previous cubic Bezier).
+    // L-shape: lastOwn → horizontal to cornerX → vertical to main lane →
+    // horizontal to mergeCommit.x. Matches the stem style throughout.
     let rejoinPath = null;
-    if (mergedBack && lastOwnCommit) {
-      // Minimum visual width for the rejoin curve. Branches merged seconds
-      // after their last commit have near-zero dx in time, which would
-      // collapse to a vertical-ish line that reads as 'straight' rather
-      // than 'flowing back'. If actual dx is smaller than this, stretch
-      // the control points so the curve bows out horizontally — the DOT
-      // stays at the real timestamp; only the handle geometry is relaxed.
-      const MIN_CURVE_WIDTH = 60;
-      const actualDx = tipCommit.x - lastOwnCommit.x;
-      const handleDx = Math.max(actualDx, MIN_CURVE_WIDTH);
-      rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} C ${lastOwnCommit.x + handleDx * 0.45},${lastOwnCommit.y} ${tipCommit.x - handleDx * 0.45},${tipCommit.y} ${tipCommit.x},${tipCommit.y}`;
+    const MIN_ELBOW_DX = 40;
+    if (mergeCommit && lastOwnCommit) {
+      const actualDx = mergeCommit.x - lastOwnCommit.x;
+      const cornerX = actualDx >= MIN_ELBOW_DX
+        ? mergeCommit.x
+        : lastOwnCommit.x + MIN_ELBOW_DX;
+      rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} L ${cornerX},${lastOwnCommit.y} L ${cornerX},${mergeCommit.y} L ${mergeCommit.x},${mergeCommit.y}`;
     }
-    // Fallback pointer: dashed vertical from tip position down to the
-    // commit's actual location when we have no own-commits to curve from.
-    // Should be rare now that pickBranch respects main's first-parent trunk.
+
+    // Fallback dashed pointer for FF-merged / pure-alias branches (no
+    // own commits to anchor an elbow).
     const pointerPath = (mergedBack && !lastOwnCommit)
       ? `M ${tipCommit.x},${y} L ${tipCommit.x},${tipCommit.y}`
       : null;
+
     return {
       branch: b,
       commit: tipCommit,
       lastOwnCommit,
+      mergeCommit,
       x: lastOwnCommit ? lastOwnCommit.x : tipCommit.x,
-      y,
+      y: lastOwnCommit ? lastOwnCommit.y : y,
       lane,
       mergedBack,
       rejoinPath,

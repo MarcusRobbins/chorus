@@ -305,10 +305,13 @@ const CSS_TEXT = `
 
   .phy-merge { fill: none; stroke: #888; stroke-width: 1.5; stroke-dasharray: 3,3; opacity: 0.7; }
 
-  /* Rejoin: smooth curve from branch's last own commit back down into
-     main at the merge-back point. Branch colour, full opacity — reads as
-     an active flow, not a terminal state. */
-  .phy-rejoin { fill: none; stroke-width: 2; opacity: 0.85; }
+  /* Rejoin: right-angle elbow from branch's last own commit back down into
+     main at the merge commit. Matches the stem style (same stroke-width,
+     same linejoin) so it reads as a continuous flow. */
+  .phy-rejoin {
+    fill: none; stroke-width: 2; opacity: 0.85;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
   .phy-rejoin.feature { stroke: #0366d6; }
   .phy-rejoin.auto { stroke: #e8a030; }
   .phy-rejoin.misc { stroke: #888; }
