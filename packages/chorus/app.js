@@ -1784,7 +1784,7 @@ function boot({ inIframe = false } = {}) {
     if (!configOK()) return 'Chorus';
     switch (state.screen) {
       case 'browse':        return `${esc(REPO)}`;
-      case 'propose':       return 'Suggest a change';
+      case 'propose':       return 'Start a thread';
       case 'feature':       return `<code>${esc(state.featureBranch || '…')}</code>`;
       case 'ai':            return state.ai?.status === 'running'
                               ? `AI working on <code>${esc(state.ai.branch || '…')}</code>`
@@ -1928,7 +1928,7 @@ function boot({ inIframe = false } = {}) {
       <div class="secondary">
         <button data-action="refresh-branches">Refresh</button>
       </div>
-      <button class="primary" data-action="goto-propose">✚ Suggest a change</button>
+      <button class="primary" data-action="goto-propose">✚ Start a thread</button>
     `;
   }
 
@@ -2014,39 +2014,34 @@ function boot({ inIframe = false } = {}) {
     const captureText = capture
       ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
       : 'nothing selected';
-    const slugPreview = slugify(state.name);
     return `
       ${whoHtml()}
-      <label class="field">
-        Feature name <span class="muted-s" style="font-weight:400">(becomes the branch)</span>
-        <input type="text" data-field="name" value="${esc(state.name)}" placeholder="e.g. redesign-hero" />
-      </label>
-      ${slugPreview ? `<div class="muted-s">Branch: <code>feature/${esc(slugPreview)}</code></div>` : ''}
-      <label class="field">
-        What would you like changed?
-        <textarea data-field="description" placeholder="e.g. Make the hero heading bigger and add a subtitle">${esc(state.description)}</textarea>
-      </label>
+      <p class="muted">Drop a comment pinned to an element. You can discuss it, and any reply can later trigger an AI build on its own branch.</p>
       <div>
-        <div class="muted-s" style="margin-bottom:3px;">Selected element</div>
+        <div class="muted-s" style="margin-bottom:6px;">Selected element</div>
         <div class="${captureClass}">${esc(captureText)}</div>
       </div>
+      <label class="field">
+        What's on your mind?
+        <textarea data-field="description" placeholder="e.g. this button feels too loud — could it be softer?">${esc(state.description)}</textarea>
+      </label>
       ${state.authError ? `<div class="err">${esc(state.authError)}</div>` : ''}
     `;
   }
 
   function proposeActions() {
     const hasText = state.description.trim();
-    const canTicket = state.name.trim() && hasText && !state.filing;
-    const canDiscuss = hasText && !!state.capture && !state.filing;
-    const buildLabel = state.filing ? 'Filing…' : '🤖 File & build with AI';
+    const hasElement = !!state.capture;
+    const canStart = hasText && hasElement && !state.filing;
+    const startLabel = state.filing ? 'Starting…' : 'Start thread';
+    const buildLabel = state.filing ? 'Starting…' : '🤖 Start & build with AI';
     return `
       <div class="secondary">
         <button data-action="pick">${state.pickMode ? 'Cancel pick' : 'Pick element'}</button>
         ${state.capture ? `<button data-action="clear-capture">Clear</button>` : ''}
-        <button data-action="start-discussion" ${canDiscuss ? '' : 'disabled'} title="${state.capture ? 'Start a comment thread pinned to this element' : 'Pick an element first to discuss'}">💬 Discuss</button>
-        <button data-action="file-only" ${canTicket ? '' : 'disabled'}>Just file it</button>
+        <button data-action="start-discussion" ${canStart ? '' : 'disabled'} title="Create the thread without running AI">${startLabel}</button>
       </div>
-      <button class="primary" data-action="file-and-build" ${canTicket ? '' : 'disabled'}>${buildLabel}</button>
+      <button class="primary" data-action="start-and-build" ${canStart ? '' : 'disabled'} title="Create the thread and immediately run AI on the first message">${buildLabel}</button>
     `;
   }
 
@@ -2137,7 +2132,7 @@ function boot({ inIframe = false } = {}) {
       <div class="secondary">
         ${!isMain && authed ? `<button data-action="merge" title="Merge this branch to main">Merge</button>` : ''}
       </div>
-      ${!isMain ? `<button class="primary" data-action="refine" ${authed ? '' : 'disabled title="Sign in to refine"'}>🤖 Refine with AI</button>` : `<button class="primary" data-action="goto-propose">✚ Suggest a change</button>`}
+      ${!isMain ? `<button class="primary" data-action="refine" ${authed ? '' : 'disabled title="Sign in to refine"'}>🤖 Refine with AI</button>` : `<button class="primary" data-action="goto-propose">✚ Start a thread</button>`}
     `;
   }
 
@@ -2222,7 +2217,7 @@ function boot({ inIframe = false } = {}) {
       </div>
       <label class="field">
         Reply
-        <textarea data-field="thread-reply" placeholder="Your thoughts…">${esc(state.threadComposeDraft || '')}</textarea>
+        <textarea data-field="thread-reply" placeholder="Reply to discuss — or describe a change and click 🤖 Build with AI to spin up a branch.">${esc(state.threadComposeDraft || '')}</textarea>
       </label>
     `;
   }
@@ -2249,12 +2244,15 @@ function boot({ inIframe = false } = {}) {
     const hasDraft = (state.threadComposeDraft || '').trim().length > 0;
     const t = state.currentThread;
     const issueOpen = t?.issue?.state === 'open';
+    if (!issueOpen) {
+      return `<div class="secondary"><span class="muted-s">Thread resolved</span></div>`;
+    }
     return `
       <div class="secondary">
-        ${t && issueOpen ? `<button data-action="promote-thread" title="Turn this discussion into a ticket and run AI on it">🚀 Promote to ticket</button>` : ''}
-        ${t && issueOpen ? `<button data-action="close-thread" title="Close this discussion">Resolve</button>` : ''}
+        <button data-action="close-thread" title="Mark this thread resolved">Resolve</button>
+        <button data-action="post-thread-reply" ${hasDraft ? '' : 'disabled'}>Reply</button>
       </div>
-      <button class="primary" data-action="post-thread-reply" ${hasDraft ? '' : 'disabled'}>Post reply</button>
+      <button class="primary" data-action="thread-build" ${hasDraft ? '' : 'disabled'} title="Spin up a branch: run AI with this message as the prompt">🤖 Build with AI</button>
     `;
   }
 
@@ -2307,12 +2305,20 @@ function boot({ inIframe = false } = {}) {
     }
   }
 
-  async function startDiscussion() {
+  // Create a thread pinned to the current element with the current compose
+  // text as the initial message. If `thenBuild` is true, additionally kick
+  // off an AI build whose generated branch is announced back in the thread.
+  async function startDiscussion(thenBuild = false) {
     if (!requireAuth('threadList')) return;
     if (!state.capture) return;
     if (state.newThreadFiling) return;
     const text = state.description.trim();
     if (!text) return;
+    if (thenBuild && !state.openaiKey) {
+      state.pendingIntent = 'start-and-build';
+      navigate('keyPrompt');
+      return;
+    }
     state.newThreadFiling = true;
     state.filing = true;
     renderPanel();
@@ -2324,14 +2330,26 @@ function boot({ inIframe = false } = {}) {
         page: state.currentPath || 'index.html',
         bbox: state.capture.rect,
       };
-      const title = 'Discussion on ' + (state.capture.text?.slice(0, 40) || `<${state.capture.tag}>`);
+      const title = (state.capture.text?.slice(0, 60) || `<${state.capture.tag}>`);
       const issue = await gh.createDiscussionThread(state.token, OWNER, REPONAME, { title, text, meta });
-      // Reset compose state + navigate into the new thread.
+      state.threadsLoadedFor = ''; // force reload next time
+      // Remember the element + instruction BEFORE we wipe them; if we're
+      // building, we'll hand them to beginFirstAiTurn.
+      const aiCapture = state.capture;
+      const aiText = text;
       state.description = '';
       state.name = '';
       state.capture = null;
-      state.threadsLoadedFor = ''; // force reload next time
-      openThread(issue.number);
+
+      if (thenBuild) {
+        await kickOffAiForThread({
+          issue: { number: issue.number, html_url: issue.html_url },
+          promptText: aiText,
+          capture: aiCapture,
+        });
+      } else {
+        openThread(issue.number);
+      }
     } catch (err) {
       state.authError = String(err?.message || err);
       renderPanel();
@@ -2339,6 +2357,54 @@ function boot({ inIframe = false } = {}) {
       state.newThreadFiling = false;
       state.filing = false;
     }
+  }
+
+  // Kick off an AI build attributed to an existing thread. The AI session
+  // commits on a new feature branch and posts its summary back to the
+  // thread's issue as a comment.
+  async function kickOffAiForThread({ issue, promptText, capture }) {
+    state._pendingIssue = issue;
+    state.capture = capture || null;
+    state.description = promptText;
+    // Branch name: slug of the prompt, fallback to thread-<N>-<timestamp>.
+    const baseSlug = slugify(promptText) || `thread-${issue.number}`;
+    state.name = `${baseSlug}-${Date.now().toString(36).slice(-4)}`;
+    beginFirstAiTurn();
+  }
+
+  // Invoked from the thread view composer. Uses the current thread's
+  // metadata + the reply-compose text as the AI prompt, creates a new
+  // branch, posts the build summary back to the thread.
+  async function buildFromThread() {
+    const t = state.currentThread;
+    if (!t?.issue) return;
+    const text = (state.threadComposeDraft || '').trim();
+    if (!text) return;
+    if (!requireAuth('threadView')) return;
+    if (!state.openaiKey) {
+      state.pendingIntent = 'thread-build';
+      navigate('keyPrompt');
+      return;
+    }
+    // Post the user's message as a comment first so the thread records
+    // the intent ('let's try X'). The AI result will post as a separate
+    // comment announcing the branch.
+    try {
+      const comment = await gh.createIssueComment(state.token, OWNER, REPONAME, t.issue.number, text);
+      t.comments = [...(t.comments || []), comment];
+    } catch (err) {
+      console.warn('[chorus] thread build comment failed', err);
+    }
+    state.threadComposeDraft = '';
+    const capture = t.meta ? {
+      selector: t.meta.selector, text: t.meta.text, tag: t.meta.tag,
+      rect: t.meta.bbox, url: t.meta.page,
+    } : null;
+    await kickOffAiForThread({
+      issue: { number: t.issue.number, html_url: t.issue.html_url },
+      promptText: text,
+      capture,
+    });
   }
 
   async function postThreadReply() {
@@ -2710,30 +2776,29 @@ function boot({ inIframe = false } = {}) {
       navigate('propose');
     });
 
-    // Propose
-    const nameInput = panelEl.querySelector('[data-field="name"]');
-    nameInput?.addEventListener('input', (e) => {
-      state.name = e.target.value;
-      renderPanel();
-      // re-focus after re-render
-      const n = panelEl?.querySelector('[data-field="name"]');
-      if (n) { n.focus(); const l = n.value.length; n.setSelectionRange(l, l); }
-    });
+    // Propose (thread compose): single textarea. On transitions between
+    // empty and non-empty we re-render so the action-bar buttons update
+    // (disabled state depends on content); between transitions we just
+    // keep typing.
     const descInput = panelEl.querySelector('[data-field="description"]');
     descInput?.addEventListener('input', (e) => {
+      const prev = (state.description || '').trim().length > 0;
+      const now = e.target.value.trim().length > 0;
       state.description = e.target.value;
-      // Don't re-render; just update the submit button state
-      const b = panelEl.querySelector('[data-action="file-and-build"]');
-      const b2 = panelEl.querySelector('[data-action="file-only"]');
-      const ok = state.name.trim() && state.description.trim();
-      if (b) b.disabled = !ok || state.filing;
-      if (b2) b2.disabled = !ok || state.filing;
+      if (prev !== now) {
+        renderPanel();
+        const again = panelEl?.querySelector('[data-field="description"]');
+        if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+      }
     });
     on('[data-action="pick"]', 'click', () => state.pickMode ? exitPickMode() : enterPickMode());
     on('[data-action="clear-capture"]', 'click', () => { state.capture = null; renderPanel(); });
-    on('[data-action="file-and-build"]', 'click', () => submitTicket(true));
-    on('[data-action="file-only"]', 'click', () => submitTicket(false));
-    on('[data-action="start-discussion"]', 'click', startDiscussion);
+    on('[data-action="start-discussion"]', 'click', () => startDiscussion(false));
+    on('[data-action="start-and-build"]', 'click', () => startDiscussion(true));
+    on('[data-action="thread-build"]', 'click', buildFromThread);
+    // Legacy actions kept for backwards compat if any embed uses them:
+    on('[data-action="file-and-build"]', 'click', () => startDiscussion(true));
+    on('[data-action="file-only"]', 'click', () => startDiscussion(false));
 
     // Discussions
     on('[data-action="goto-threads"]', 'click', () => {
@@ -2839,6 +2904,8 @@ function boot({ inIframe = false } = {}) {
       const intent = state.pendingIntent; state.pendingIntent = null;
       if (intent === 'refine') startRefine();
       else if (intent === 'build') beginFirstAiTurn();
+      else if (intent === 'start-and-build') startDiscussion(true);
+      else if (intent === 'thread-build') buildFromThread();
       else navigate('browse', { reset: true });
     });
 
@@ -3648,6 +3715,15 @@ function boot({ inIframe = false } = {}) {
       state.capture = d.capture || null;
       state.pickMode = false;
       openPanel();
+      // If the capture is the result of the user explicitly picking an
+      // element to start a new thread (i.e. they're NOT already in a
+      // session where they'd want the element attached — ai, feature,
+      // threadView, propose), land them on the thread compose screen so
+      // the flow reads as 'pick → write comment → post'.
+      const composableScreens = ['browse', 'threadList'];
+      if (composableScreens.includes(state.screen)) {
+        navigate('propose');
+      }
     }
     if (d.type === 'chorus:preview:cancelled') {
       state.pickMode = false;
