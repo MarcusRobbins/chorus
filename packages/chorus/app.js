@@ -59,14 +59,15 @@ const CSS_TEXT = `
     transition: top .2s ease, bottom .2s ease, width .2s ease, max-height .2s ease;
   }
   /* When the phylogeny band is visible, the panel becomes a tall right-
-     hand column from the top of the viewport down to the top of the
-     phylogeny band (edges touching — no gap). The --chorus-top-height
-     CSS variable is shared with the iframe + phylogeny so the resize
-     handle can adjust all three in unison. */
+     hand column abutting the iframe. Width + height + position all
+     derive from CSS variables that drag handles update in unison. */
   .panel.with-phylogeny {
     top: 24px;
+    right: 24px;
     bottom: calc(100vh - 24px - var(--chorus-top-height, 66vh));
+    width: var(--chorus-panel-width, 420px);
     max-height: none;
+    max-width: none;
   }
 
   /* Header */
@@ -279,9 +280,7 @@ const CSS_TEXT = `
   }
 
   /* Horizontal resize handle between top row (iframe + panel) and the
-     phylogeny. Dragging up grows phylogeny; down grows iframe/panel.
-     Hit target is 10px tall; visible indicator is thinner and only
-     highlights on hover/drag. */
+     phylogeny. Dragging up grows phylogeny; down grows iframe/panel. */
   .chorus-resize-h {
     position: fixed;
     top: calc(24px + var(--chorus-top-height, 66vh) - 4px);
@@ -304,6 +303,35 @@ const CSS_TEXT = `
   }
   .chorus-resize-h:hover::after,
   .chorus-resize-h.dragging::after {
+    background: #0366d6;
+  }
+
+  /* Vertical resize handle between iframe and panel (only visible when
+     the panel is in its with-phylogeny tall-column form). Dragging
+     right grows iframe / shrinks panel; left grows panel / shrinks
+     iframe. */
+  .chorus-resize-v {
+    position: fixed;
+    top: 24px;
+    bottom: calc(100vh - 24px - var(--chorus-top-height, 66vh));
+    right: calc(24px + var(--chorus-panel-width, 420px) - 4px);
+    width: 8px;
+    cursor: col-resize;
+    pointer-events: auto;
+    z-index: 2147483641;
+    display: none;
+  }
+  .chorus-resize-v.active { display: block; }
+  .chorus-resize-v::after {
+    content: '';
+    position: absolute;
+    left: 3px; top: 0; bottom: 0; width: 2px;
+    background: transparent;
+    border-radius: 1px;
+    transition: background .1s ease;
+  }
+  .chorus-resize-v:hover::after,
+  .chorus-resize-v.dragging::after {
     background: #0366d6;
   }
   .phylogeny-host.active { display: block; }
@@ -835,17 +863,31 @@ function boot({ inIframe = false } = {}) {
   phyHost.appendChild(phyBody);
   root.appendChild(phyHost);
 
-  // Resize handle for the horizontal split between iframe/panel and
-  // phylogeny. Updates --chorus-top-height on document.documentElement
-  // so the iframe (via preview.js), panel, and phylogeny all move in
-  // unison.
+  // Resize handles.
+  //  - horizontal (chorus-resize-h): splits top row / phylogeny
+  //  - vertical   (chorus-resize-v): splits iframe / panel
   const resizeHandle = document.createElement('div');
   resizeHandle.className = 'chorus-resize-h';
   root.appendChild(resizeHandle);
+  const resizeHandleV = document.createElement('div');
+  resizeHandleV.className = 'chorus-resize-v';
+  root.appendChild(resizeHandleV);
 
-  // Show/hide the handle alongside the phylogeny band.
   function updateResizeHandleVisibility() {
-    resizeHandle.classList.toggle('active', wantPhyVisible());
+    const visible = wantPhyVisible();
+    resizeHandle.classList.toggle('active', visible);
+    resizeHandleV.classList.toggle('active', visible);
+    // When the tall-column panel is active, pin the iframe's width to
+    // fill the space to the left of the panel. Otherwise let it revert
+    // to its default (62vw).
+    if (visible) {
+      document.documentElement.style.setProperty(
+        '--chorus-iframe-width',
+        'calc(100vw - var(--chorus-panel-width, 420px) - 48px)'
+      );
+    } else {
+      document.documentElement.style.removeProperty('--chorus-iframe-width');
+    }
   }
 
   // Drag logic.
@@ -884,6 +926,41 @@ function boot({ inIframe = false } = {}) {
   };
   resizeHandle.addEventListener('pointerup', endDrag);
   resizeHandle.addEventListener('pointercancel', endDrag);
+
+  // Vertical handle drag: updates --chorus-panel-width based on how far
+  // the pointer is from the right edge of the viewport. Iframe width
+  // follows automatically via calc(100vw - panelWidth - 48px).
+  let vDragStartX = 0;
+  let vDragStartWidth = 0;
+  let vDragging = false;
+  resizeHandleV.addEventListener('pointerdown', (e) => {
+    vDragging = true;
+    vDragStartX = e.clientX;
+    const panel = panelEl;
+    vDragStartWidth = panel
+      ? panel.getBoundingClientRect().width
+      : 420;
+    resizeHandleV.classList.add('dragging');
+    resizeHandleV.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizeHandleV.addEventListener('pointermove', (e) => {
+    if (!vDragging) return;
+    const dx = vDragStartX - e.clientX; // drag left = widen panel
+    const min = 280;
+    const max = window.innerWidth * 0.7;
+    const next = Math.max(min, Math.min(max, vDragStartWidth + dx));
+    document.documentElement.style.setProperty('--chorus-panel-width', next + 'px');
+    phylogeny?.resize();
+  });
+  const endVDrag = (e) => {
+    if (!vDragging) return;
+    vDragging = false;
+    resizeHandleV.classList.remove('dragging');
+    try { resizeHandleV.releasePointerCapture(e.pointerId); } catch {}
+  };
+  resizeHandleV.addEventListener('pointerup', endVDrag);
+  resizeHandleV.addEventListener('pointercancel', endVDrag);
 
   let phylogeny = null; // lazily created on first show
   let phyData = null;   // { commits, branches, mainName }

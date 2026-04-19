@@ -27,8 +27,10 @@ function applyMode(iframe, windowed) {
     // Height reads from a CSS variable on :root so the top-row resize
     // handle in chorus can drag the iframe + panel + phylogeny split
     // in unison. Default 66vh.
+    // Width also reads from a variable so the vertical resize handle
+    // between iframe and panel can adjust both at once. Default 62vw.
     s.top = '24px'; s.left = '24px'; s.right = 'auto'; s.bottom = 'auto';
-    s.width = 'var(--chorus-top-width, 62vw)';
+    s.width = 'var(--chorus-iframe-width, 62vw)';
     s.height = 'var(--chorus-top-height, 66vh)';
     s.borderRadius = '10px';
     s.borderWidth = '1px'; s.borderStyle = 'solid'; s.borderColor = '#bbb';
