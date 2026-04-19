@@ -55,6 +55,12 @@ const CSS_TEXT = `
     display: flex; flex-direction: column;
     pointer-events: auto;
     overflow: hidden;
+    transition: width .2s ease, max-height .2s ease;
+  }
+  /* In tree mode we get a wider panel because the iframe has shrunk to
+     windowed (top-left) and there's room on the right. */
+  .panel.tree-mode {
+    width: 560px; max-height: 88vh;
   }
 
   /* Header */
@@ -161,6 +167,91 @@ const CSS_TEXT = `
   .branch .marker.feature { background: #e6f4ff; color: #0366d6; }
   .branch .marker.auto { background: #fff4e6; color: #a60; }
   .section-heading { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin: 6px 0 2px; }
+
+  /* Phylogeny tree */
+  .tree {
+    position: relative;
+    padding: 8px 4px 8px 32px;
+    font-size: 13px;
+  }
+  .tree-trunk {
+    position: absolute;
+    left: 18px; top: 24px; bottom: 24px;
+    width: 2px; background: #ddd;
+    border-radius: 1px;
+  }
+  .tree-node {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; margin: 4px 0;
+    border-radius: 6px; cursor: pointer;
+    transition: background .1s ease;
+  }
+  .tree-node:hover { background: #f4f4f4; }
+  .tree-node.active { background: #eef4ff; border: 1px solid #cfe2ff; padding: 7px 9px; }
+  .tree-node.root { cursor: default; }
+  .tree-node.root:hover { background: transparent; }
+  .tree-node .connector {
+    position: absolute;
+    left: -14px; top: 50%;
+    width: 14px; height: 2px;
+    background: #ddd;
+  }
+  .tree-node.root .connector { display: none; }
+  .tree-node .dot {
+    width: 10px; height: 10px; border-radius: 5px;
+    background: #888; flex-shrink: 0;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1.5px #888;
+  }
+  .tree-node.root .dot { background: #111; box-shadow: 0 0 0 1.5px #111; width: 12px; height: 12px; }
+  .tree-node.feature .dot { background: #0366d6; box-shadow: 0 0 0 1.5px #0366d6; }
+  .tree-node.auto .dot { background: #e8a030; box-shadow: 0 0 0 1.5px #e8a030; }
+  .tree-node .label {
+    flex: 1;
+    display: flex; flex-direction: column; gap: 2px;
+    overflow: hidden;
+  }
+  .tree-node .label .name {
+    font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tree-node .label .meta {
+    font-size: 11px; color: #888;
+  }
+  .tree-node .sha {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: #999;
+    flex-shrink: 0;
+  }
+  .tree-section-heading {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    color: #aaa; margin: 10px 0 0 0; padding: 0 10px;
+  }
+  .tree-sprout {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; margin: 8px 0 4px;
+    border-radius: 6px; cursor: pointer;
+    color: #0366d6; font-size: 12px;
+    border: 1px dashed #cfe2ff; background: transparent;
+    transition: background .1s ease;
+  }
+  .tree-sprout:hover { background: #f0f6ff; }
+  .tree-sprout .connector {
+    position: absolute; left: -14px; top: 50%;
+    width: 14px; height: 2px; background: #cfe2ff;
+  }
+
+  /* Header view-mode toggle */
+  .header .view-toggle {
+    border: 1px solid #ddd; background: #fff; cursor: pointer;
+    font-size: 14px; color: #666;
+    padding: 3px 8px; border-radius: 5px;
+    transition: background .1s ease, color .1s ease;
+  }
+  .header .view-toggle:hover { background: #f4f4f4; color: #111; }
+
 
   /* Capture card */
   .capture {
@@ -512,6 +603,7 @@ function boot({ inIframe = false } = {}) {
   const savedUser = storeLoad('user');
   const savedOpenAIKey = storeLoad('openaiKey');
   const savedModel = storeLoad('openaiModel');
+  const savedViewMode = storeLoad('viewMode');
 
   // ── State ──────────────────────────────────────────────────────
   const state = {
@@ -563,6 +655,10 @@ function boot({ inIframe = false } = {}) {
 
     // Picker
     pickMode: false,
+
+    // View mode — 'tree' (phylogeny) is the new default; 'list' is the
+    // fallback in case the tree experiment doesn't land well.
+    viewMode: savedViewMode === 'list' ? 'list' : 'tree',
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -758,7 +854,11 @@ function boot({ inIframe = false } = {}) {
     if (!state.open) { renderTrigger(); return; }
     panelEl?.remove();
     panelEl = document.createElement('div');
-    panelEl.className = 'panel';
+    // Panel widens when we're in tree mode on the browse screen (the only
+    // place the tree actually renders). Keeps the footprint minimal on
+    // propose/feature/ai screens where the existing layout is tight.
+    const useWide = state.viewMode === 'tree' && state.screen === 'browse';
+    panelEl.className = 'panel' + (useWide ? ' tree-mode' : '');
 
     const header = renderHeader();
     const body = renderBody();
@@ -777,11 +877,18 @@ function boot({ inIframe = false } = {}) {
   function renderHeader() {
     const title = headerTitle();
     const canBack = state.backStack.length > 0;
+    // View-mode toggle only shows up on browse — the other screens don't
+    // have list-vs-tree variants. Icon flips to signal the OTHER mode,
+    // not the current one (it's an action, not a status indicator).
+    const showToggle = state.screen === 'browse';
+    const toggleIcon = state.viewMode === 'tree' ? '☰' : '⑂';
+    const toggleTitle = state.viewMode === 'tree' ? 'Switch to list view' : 'Switch to tree view';
     const el = document.createElement('div');
     el.className = 'header';
     el.innerHTML = `
       <button class="back" ${canBack ? '' : 'hidden'} data-action="back" title="Back">←</button>
       <div class="title">${title}</div>
+      ${showToggle ? `<button class="view-toggle" data-action="toggle-view" title="${toggleTitle}">${toggleIcon}</button>` : ''}
       <button class="close" data-action="close" title="Close">✕</button>
     `;
     return el;
@@ -859,6 +966,10 @@ function boot({ inIframe = false } = {}) {
   // SCREEN: Browse
   // ═══════════════════════════════════════════════════════════════
   function browseHtml() {
+    return state.viewMode === 'tree' ? browseTreeHtml() : browseListHtml();
+  }
+
+  function browseListHtml() {
     const main = state.branches.find((b) => b.name === 'main' || b.name === 'master');
     const features = state.branches.filter((b) => b.name.startsWith('feature/'));
     const autos = state.branches.filter((b) => b.name.startsWith('auto/') && b !== main);
@@ -872,6 +983,55 @@ function boot({ inIframe = false } = {}) {
       ${features.length ? `<div class="section-heading">Features</div><div class="branch-list">${features.map((b) => branchItem(b, 'feature')).join('')}</div>` : ''}
       ${autos.length ? `<div class="section-heading">Auto branches</div><div class="branch-list">${autos.map((b) => branchItem(b, 'auto')).join('')}</div>` : ''}
       ${misc.length ? `<div class="section-heading">Other</div><div class="branch-list">${misc.map((b) => branchItem(b, '')).join('')}</div>` : ''}
+    `;
+  }
+
+  // Phylogeny view — main as the trunk, branches fanning off.
+  // v1: flat (all feature + auto branches hang directly off main). Later
+  // iterations can show branch-from-branch nesting and merge arcs.
+  function browseTreeHtml() {
+    const main = state.branches.find((b) => b.name === 'main' || b.name === 'master');
+    const features = state.branches.filter((b) => b.name.startsWith('feature/'));
+    const autos = state.branches.filter((b) => b.name.startsWith('auto/') && b !== main);
+    const misc = state.branches.filter((b) => b !== main && !b.name.startsWith('feature/') && !b.name.startsWith('auto/'));
+    const hasChildren = features.length + autos.length + misc.length > 0;
+    return `
+      ${whoHtml()}
+      ${state.branchesError ? `<div class="err">${esc(state.branchesError)}</div>` : ''}
+      ${state.branchesLoading && !state.branches.length ? `<div class="muted-s">Loading branches…</div>` : ''}
+      <div class="tree">
+        ${hasChildren ? `<div class="tree-trunk"></div>` : ''}
+        ${main ? treeNode(main, 'root') : ''}
+        ${features.map((b) => treeNode(b, 'feature')).join('')}
+        ${autos.map((b) => treeNode(b, 'auto')).join('')}
+        ${misc.map((b) => treeNode(b, 'misc')).join('')}
+        <button class="tree-sprout" data-action="goto-propose">
+          <span class="connector"></span>
+          ✚ Sprout a new feature from <code>main</code>
+        </button>
+      </div>
+    `;
+  }
+
+  function treeNode(b, kind) {
+    const isCurrent = state.currentBranch === b.name;
+    const isRoot = kind === 'root';
+    const cls = ['tree-node', kind];
+    if (isCurrent) cls.push('active');
+    const displayName = isRoot
+      ? b.name
+      : b.name.replace(/^(feature|auto)\//, '');
+    const action = isRoot ? '' : ` data-action="select-branch" data-branch="${esc(b.name)}"`;
+    return `
+      <div class="${cls.join(' ')}"${action}>
+        ${isRoot ? '' : '<span class="connector"></span>'}
+        <span class="dot"></span>
+        <span class="label">
+          <span class="name">${esc(displayName)}</span>
+          ${isRoot ? '<span class="meta">trunk</span>' : ''}
+        </span>
+        <span class="sha">${esc((b.commit?.sha || '').slice(0, 7))}</span>
+      </div>
     `;
   }
 
@@ -1377,9 +1537,18 @@ function boot({ inIframe = false } = {}) {
     // Header
     on('[data-action="back"]', 'click', goBack);
     on('[data-action="close"]', 'click', closePanel);
+    on('[data-action="toggle-view"]', 'click', () => {
+      state.viewMode = state.viewMode === 'tree' ? 'list' : 'tree';
+      storeSave('viewMode', state.viewMode);
+      renderPanel();
+    });
 
-    // Browse
+    // Browse (list view)
     panelEl.querySelectorAll('.branch').forEach((el) => {
+      el.addEventListener('click', () => selectBranch(el.dataset.branch));
+    });
+    // Browse (tree view) — same navigation, different selector
+    panelEl.querySelectorAll('[data-action="select-branch"]').forEach((el) => {
       el.addEventListener('click', () => selectBranch(el.dataset.branch));
     });
     on('[data-action="refresh-branches"]', 'click', fetchBranches);
