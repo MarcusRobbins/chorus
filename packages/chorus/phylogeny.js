@@ -121,16 +121,40 @@ export async function loadPhylogenyData({ token, owner, repo, branches, gh }) {
 // branchPath, mergeEdges, lane, pickBranch}.
 
 function computeLayout({ commits, branches, mainName }, { width, height }) {
-  // Assign a "primary branch" to each commit: the branch this commit is
-  // canonically considered to live on. A commit may have multiple refs
-  // (e.g. a commit on main is also "on" every feature branch branched
-  // after it). Main wins; after that, stable order of the branch list.
-  const branchOrder = [
-    mainName,
-    ...branches.filter((b) => !b.isMain).map((b) => b.name),
-  ];
+  // "pickBranch" — the lane this commit should render on.
+  //
+  // Naive 'first ref wins' is wrong: after a /merges call, main reaches
+  // every commit on the merged branch via the merge commit's second
+  // parent, so those commits have {main, feature/x} in their refs. If we
+  // pick main, the branch has no own-lane commits and the rejoin curve
+  // has nothing to anchor to.
+  //
+  // Correct definition: a commit is 'on main' if and only if it's reachable
+  // from main by walking FIRST PARENTS only. That's main's trunk — the
+  // continuous mainline of development. Merge commits' second parents
+  // (which are the merged-in branches' tips) are NOT on the trunk, so they
+  // stay on their own branch's lane and the rejoin curve draws cleanly.
+  const mainBranch = branches.find((b) => b.name === mainName);
+  const mainTrunk = new Set();
+  if (mainBranch?.tipSha) {
+    let cursor = mainBranch.tipSha;
+    // Defensive: cap iterations so a cycle can't loop us forever.
+    let safety = 10000;
+    while (cursor && !mainTrunk.has(cursor) && safety-- > 0) {
+      mainTrunk.add(cursor);
+      const c = commits.get(cursor);
+      cursor = c?.parents?.[0] || null;
+    }
+  }
+  const nonMainNames = branches.filter((b) => !b.isMain).map((b) => b.name);
   for (const c of commits.values()) {
-    c.pickBranch = branchOrder.find((bn) => c.refs.has(bn)) || mainName;
+    if (mainTrunk.has(c.sha)) {
+      c.pickBranch = mainName;
+    } else {
+      // Not on main's trunk — pick the first non-main branch that has it
+      // in its reachable set. Fall back to main if somehow on nothing.
+      c.pickBranch = nonMainNames.find((bn) => c.refs.has(bn)) || mainName;
+    }
   }
 
   // Lane assignment: main at the bottom (visual "trunk / foundation"),
@@ -206,11 +230,20 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     // so the curve has some slack instead of a hard diagonal.
     let rejoinPath = null;
     if (mergedBack && lastOwnCommit) {
-      const dx = tipCommit.x - lastOwnCommit.x;
-      rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} C ${lastOwnCommit.x + dx * 0.45},${lastOwnCommit.y} ${tipCommit.x - dx * 0.45},${tipCommit.y} ${tipCommit.x},${tipCommit.y}`;
+      // Minimum visual width for the rejoin curve. Branches merged seconds
+      // after their last commit have near-zero dx in time, which would
+      // collapse to a vertical-ish line that reads as 'straight' rather
+      // than 'flowing back'. If actual dx is smaller than this, stretch
+      // the control points so the curve bows out horizontally — the DOT
+      // stays at the real timestamp; only the handle geometry is relaxed.
+      const MIN_CURVE_WIDTH = 60;
+      const actualDx = tipCommit.x - lastOwnCommit.x;
+      const handleDx = Math.max(actualDx, MIN_CURVE_WIDTH);
+      rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} C ${lastOwnCommit.x + handleDx * 0.45},${lastOwnCommit.y} ${tipCommit.x - handleDx * 0.45},${tipCommit.y} ${tipCommit.x},${tipCommit.y}`;
     }
     // Fallback pointer: dashed vertical from tip position down to the
     // commit's actual location when we have no own-commits to curve from.
+    // Should be rare now that pickBranch respects main's first-parent trunk.
     const pointerPath = (mergedBack && !lastOwnCommit)
       ? `M ${tipCommit.x},${y} L ${tipCommit.x},${tipCommit.y}`
       : null;
