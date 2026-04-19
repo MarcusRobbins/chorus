@@ -219,6 +219,16 @@ const CSS_TEXT = `
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   .settings-modal > .body { padding: 16px; gap: 14px; }
+  .settings-identity {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-weight: 400; color: var(--c-text-muted);
+    font-size: 12px;
+  }
+  .settings-identity img {
+    width: 16px; height: 16px; border-radius: 999px;
+    border: 1px solid var(--c-border);
+  }
+  .settings-identity strong { color: var(--c-text); font-weight: 500; }
 
   /* Header overflow menu dropdown */
   .menu-wrap { position: relative; }
@@ -1872,10 +1882,16 @@ function boot({ inIframe = false } = {}) {
     settingsModalEl = document.createElement('div');
     settingsModalEl.className = 'settings-backdrop';
     const actionBarHtml = settingsActions();
+    const identity = auth.isAuthed() && state.user
+      ? `<span class="settings-identity">
+           <img src="${esc(state.user.avatar_url)}" alt="" />
+           Signed in as <strong>${esc(state.user.login)}</strong>
+         </span>`
+      : '';
     settingsModalEl.innerHTML = `
       <div class="settings-modal">
         <div class="header">
-          <div class="title">Settings</div>
+          <div class="title">Settings${identity ? ` · ${identity}` : ''}</div>
           <button class="close" data-action="close-settings" title="Close">✕</button>
         </div>
         <div class="body">
@@ -2915,7 +2931,6 @@ function boot({ inIframe = false } = {}) {
     const isCustom = !MODEL_OPTIONS.includes(currentModel);
     const selectValue = isCustom ? '__custom__' : currentModel;
     return `
-      ${whoHtml()}
       <div>
         <div class="muted-s">OpenAI key</div>
         <div style="display:flex; align-items:center; gap:8px; margin-top:3px;">
@@ -2937,7 +2952,6 @@ function boot({ inIframe = false } = {}) {
         </label>
       ` : ''}
       <p class="muted-s">Default is <code>${esc(DEFAULT_MODEL)}</code>. Unknown models will 404 at OpenAI.</p>
-      <p class="muted-s">All credentials clear when you close this tab.</p>
     `;
   }
   function settingsActions() {
@@ -3821,17 +3835,13 @@ function boot({ inIframe = false } = {}) {
   // ═══════════════════════════════════════════════════════════════
   // Small helpers
   // ═══════════════════════════════════════════════════════════════
+  // Used only by non-authed fallbacks now — when signed in, the identity
+  // lives in the settings modal's title strip instead of a body row.
   function whoHtml() {
     if (!auth.isAuthed() || !state.user) {
       return `<div class="who">Not signed in · <button class="link-btn" data-action="sign-in">Sign in with GitHub</button></div>`;
     }
-    return `
-      <div class="who">
-        <img src="${esc(state.user.avatar_url)}" alt="" />
-        <span>Signed in as <strong>${esc(state.user.login)}</strong></span>
-        <button class="link-btn" style="margin-left:auto; color:var(--c-text-muted);" data-action="sign-out">Sign out</button>
-      </div>
-    `;
+    return '';
   }
 
   function esc(s) {
