@@ -1981,33 +1981,60 @@ function boot({ inIframe = false } = {}) {
       lines.push('');
       lines.push(`Prior AI turns on this branch (${aiComments.length}):`);
       for (const c of aiComments) {
-        // Strip the <details> block to keep context compact; the summary is
-        // enough for the AI to orient. Full details are still in the issue
-        // for humans.
-        const condensed = (c.body || '').replace(/<details>[\s\S]*?<\/details>/g, '').trim();
-        lines.push(`- ${condensed.slice(0, 400)}`);
+        // Unwrap the <details><summary>…</summary> block so the reasoning
+        // INSIDE it becomes flat context for the next AI. We drop only the
+        // markdown tags, not the content — the whole point of the richer
+        // summariser is for this to be useful downstream.
+        const body = (c.body || '')
+          .replace(/<details>\s*<summary>[^<]*<\/summary>\s*/g, '')
+          .replace(/<\/details>/g, '')
+          .trim();
+        lines.push('');
+        lines.push(body);
       }
     }
     return lines.join('\n');
   }
 
-  // Render an AI session's event log into compact markdown for GitHub issue
-  // comments. Captures the reasoning trail (thinking, tool calls, assistant
-  // text, finish) so reviewers can see what the AI actually did without
-  // having to rerun the session. Kept short — we want a record, not a novel.
+  // Render an AI session's event log into markdown for the GitHub issue
+  // comment. This block is then re-parsed by buildPriorContext on future
+  // refine turns, so it has to carry enough information for the next AI
+  // to understand what was done and why — not just what files changed.
+  //
+  // Design:
+  // - assistant_text kept IN FULL (that's where the reasoning lives)
+  // - tool calls shown with a one-line arg preview (truncated args, not
+  //   write_file bodies — those would blow out token budgets)
+  // - write_file paths always called out clearly so subsequent turns can
+  //   see 'file X was edited' without parsing the args
+  // - errors/stops surfaced so future turns don't repeat a known failure
   function summariseReasoning(events) {
     if (!events?.length) return '';
     const lines = [];
     for (const e of events) {
-      if (e.type === 'tool_call') {
-        const argPreview = shortArgs(e.args).slice(0, 120);
-        lines.push(`- \`${e.name}(${argPreview})\``);
+      if (e.type === 'assistant_text' && e.text) {
+        // Full reasoning text. Newlines preserved via blockquote so the
+        // markdown keeps its structure inside the <details> block.
+        const quoted = e.text.trim().split('\n').map((l) => `> ${l}`).join('\n');
+        lines.push('**Reasoning:**');
+        lines.push(quoted);
+      } else if (e.type === 'tool_call') {
+        if (e.name === 'write_file') {
+          const path = e.args?.path || '(no path)';
+          const bytes = (e.args?.content || '').length;
+          lines.push(`- **edited** \`${path}\` (${bytes} bytes)`);
+        } else if (e.name === 'read_file') {
+          lines.push(`- read \`${e.args?.path || '(no path)'}\``);
+        } else if (e.name === 'list_files') {
+          lines.push(`- listed files${e.args?.ref ? ` at ref \`${e.args.ref}\`` : ''}`);
+        } else {
+          const argPreview = shortArgs(e.args).slice(0, 200);
+          lines.push(`- \`${e.name}(${argPreview})\``);
+        }
       } else if (e.type === 'tool_error') {
-        lines.push(`  - _error:_ ${String(e.error).slice(0, 160)}`);
-      } else if (e.type === 'assistant_text' && e.text) {
-        lines.push(`- _AI:_ "${e.text.replace(/\n+/g, ' ').slice(0, 200)}${e.text.length > 200 ? '…' : ''}"`);
+        lines.push(`  - ⚠ error: ${String(e.error).slice(0, 200)}`);
       } else if (e.type === 'finish') {
-        lines.push(`- ✓ finish — ${e.summary}`);
+        lines.push(`- ✓ **finished:** ${e.summary}`);
       } else if (e.type === 'stopped_without_finish') {
         lines.push(`- ⚠ stopped without calling finish`);
       } else if (e.type === 'iteration_limit') {
