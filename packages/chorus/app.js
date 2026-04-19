@@ -279,7 +279,15 @@ const CSS_TEXT = `
   }
   .phylogeny-header .title { font-weight: 600; color: #333; }
   .phylogeny-header .count { color: #888; }
-  .phylogeny-header .loading { color: #0366d6; font-style: italic; margin-left: auto; }
+  .phylogeny-header .loading { color: #0366d6; font-style: italic; }
+  .phylogeny-header .phy-reset {
+    margin-left: auto;
+    border: 1px solid #ddd; background: #fff; color: #333;
+    font: inherit; font-size: 11px;
+    padding: 3px 8px; border-radius: 5px; cursor: pointer;
+    transition: background .1s ease;
+  }
+  .phylogeny-header .phy-reset:hover { background: #f4f4f4; }
   .phylogeny-body {
     position: absolute; top: 32px; left: 0; right: 0; bottom: 0;
   }
@@ -801,7 +809,11 @@ function boot({ inIframe = false } = {}) {
       <span class="title">Phylogeny</span>
       <span class="count">${esc(counts)}</span>
       ${status ? `<span class="loading">${esc(status)}</span>` : ''}
+      <button class="phy-reset" title="Reset view (fit all)">⟲ fit</button>
     `;
+    phyHeader.querySelector('.phy-reset')?.addEventListener('click', () => {
+      phylogeny?.resetView();
+    });
   }
 
   function wantPhyVisible() {

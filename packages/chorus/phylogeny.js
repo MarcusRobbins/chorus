@@ -20,6 +20,8 @@
 //  - No canvas fallback; SVG throughout. Fine below ~5k commits.
 
 import { scaleTime, scaleLinear } from 'https://esm.sh/d3-scale@4';
+import { zoom, zoomIdentity } from 'https://esm.sh/d3-zoom@3';
+import { select, pointer } from 'https://esm.sh/d3-selection@3';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -501,8 +503,15 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
   svg.style.width = '100%';
   svg.style.height = '100%';
   svg.style.display = 'block';
+  svg.style.cursor = 'grab';
 
-  // Layers: stems (bottom), merges, dots+labels (top).
+  // Viewport group — everything inside here gets transformed by d3-zoom
+  // (pan + scale). The svg element itself stays fixed so zoom/pan is
+  // isolated to our content.
+  const viewport = document.createElementNS(NS, 'g');
+  viewport.setAttribute('class', 'phy-viewport');
+
+  // Layers inside the viewport: stems (bottom), merges, dots+labels (top).
   const gMerges = document.createElementNS(NS, 'g');
   gMerges.setAttribute('class', 'phy-merges');
   const gStems = document.createElementNS(NS, 'g');
@@ -511,10 +520,11 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
   gDots.setAttribute('class', 'phy-dots');
   const gLabels = document.createElementNS(NS, 'g');
   gLabels.setAttribute('class', 'phy-labels');
-  svg.appendChild(gStems);
-  svg.appendChild(gMerges);
-  svg.appendChild(gDots);
-  svg.appendChild(gLabels);
+  viewport.appendChild(gStems);
+  viewport.appendChild(gMerges);
+  viewport.appendChild(gDots);
+  viewport.appendChild(gLabels);
+  svg.appendChild(viewport);
   container.appendChild(svg);
 
   // Tooltip element in the container
@@ -522,6 +532,31 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
   tooltip.className = 'phy-tooltip';
   tooltip.style.display = 'none';
   container.appendChild(tooltip);
+
+  // d3-zoom — wheel to zoom, click-drag to pan. Scale clamped to a
+  // sensible range. Transform applied to the viewport group on every
+  // zoom event. Preserved across re-renders via savedTransform.
+  let savedTransform = zoomIdentity;
+  const svgSel = select(svg);
+  const zoomBehavior = zoom()
+    .scaleExtent([0.25, 6])
+    // Don't treat a click on a dot/label as the start of a pan drag —
+    // filter out pointer events whose target has an interactive role.
+    .filter((event) => {
+      // Allow wheel always. For pointerdown, reject clicks that hit a
+      // dot or text label (they carry their own onClick handlers).
+      if (event.type === 'wheel') return !event.ctrlKey; // ctrl+wheel is browser zoom
+      const t = event.target;
+      if (t?.tagName === 'circle' || t?.tagName === 'text') return false;
+      return true;
+    })
+    .on('start', () => { svg.style.cursor = 'grabbing'; })
+    .on('zoom', (event) => {
+      savedTransform = event.transform;
+      viewport.setAttribute('transform', event.transform.toString());
+    })
+    .on('end', () => { svg.style.cursor = 'grab'; });
+  svgSel.call(zoomBehavior);
 
   let currentData = null;
   let currentHighlight = null;
@@ -665,9 +700,22 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
       currentData = data;
       currentHighlight = highlight;
       layoutAndPaint(data, highlight);
+      // Re-apply any previously saved zoom transform so re-renders
+      // (e.g. new branch data arrived) don't snap back to identity.
+      if (savedTransform !== zoomIdentity) {
+        viewport.setAttribute('transform', savedTransform.toString());
+      }
     },
     resize() {
       if (currentData) layoutAndPaint(currentData, currentHighlight);
+      if (savedTransform !== zoomIdentity) {
+        viewport.setAttribute('transform', savedTransform.toString());
+      }
+    },
+    // Reset pan + zoom to the natural fit. Smoothly transitions via
+    // d3-zoom so the user can see where the identity state is.
+    resetView() {
+      svgSel.transition().duration(300).call(zoomBehavior.transform, zoomIdentity);
     },
     destroy() {
       container.innerHTML = '';
