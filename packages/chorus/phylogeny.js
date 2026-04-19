@@ -175,26 +175,55 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
   }
 
   // Branch tip positions — each branch gets its OWN lane for its tip dot +
-  // label, even if the underlying commit lives on another branch's lane
-  // (i.e., the branch has been merged / absorbed). When the tip's lane
-  // differs from its commit's pickBranch lane, we'll draw a dashed pointer
-  // down to the commit's actual position so it's visually clear where that
-  // branch points.
+  // label, even if the underlying commit lives on another branch's lane.
+  // When the branch's tip sits on a different lane (its tip commit is
+  // currently reachable from main — a merge-back has happened), we
+  // compute a "merge-back" arc from the branch's last own commit curving
+  // down into main at the tip's position. This reads as a rejoin flow
+  // rather than a terminal state; the branch could sprout new commits
+  // tomorrow and the arc just moves.
   const branchTipPositions = branches.map((b) => {
     const tipCommit = commits.get(b.tipSha);
     if (!tipCommit) return null;
     const lane = lanes.get(b.name) ?? 0;
     const y = yScale(lane);
+    const mergedBack = tipCommit.pickBranch !== b.name; // tip commit belongs to someone else's lane
+    // The branch's last commit on its own lane (most recent). If the
+    // branch has no own commits — e.g., it never actually diverged from
+    // main — lastOwnCommit is null and we degrade to a dashed stub.
+    let lastOwnCommit = null;
+    if (mergedBack) {
+      let latestTs = -Infinity;
+      for (const c of commits.values()) {
+        if (c.pickBranch === b.name && c.timestamp.getTime() > latestTs) {
+          latestTs = c.timestamp.getTime();
+          lastOwnCommit = c;
+        }
+      }
+    }
+    // Build the rejoin curve: cubic Bezier from lastOwnCommit (on branch
+    // lane) to tipCommit (on main lane). Control points flare horizontally
+    // so the curve has some slack instead of a hard diagonal.
+    let rejoinPath = null;
+    if (mergedBack && lastOwnCommit) {
+      const dx = tipCommit.x - lastOwnCommit.x;
+      rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} C ${lastOwnCommit.x + dx * 0.45},${lastOwnCommit.y} ${tipCommit.x - dx * 0.45},${tipCommit.y} ${tipCommit.x},${tipCommit.y}`;
+    }
+    // Fallback pointer: dashed vertical from tip position down to the
+    // commit's actual location when we have no own-commits to curve from.
+    const pointerPath = (mergedBack && !lastOwnCommit)
+      ? `M ${tipCommit.x},${y} L ${tipCommit.x},${tipCommit.y}`
+      : null;
     return {
       branch: b,
       commit: tipCommit,
-      x: tipCommit.x,
+      lastOwnCommit,
+      x: lastOwnCommit ? lastOwnCommit.x : tipCommit.x,
       y,
       lane,
-      absorbed: tipCommit.pickBranch !== b.name, // branch points at commit that lives on a different branch's lane
-      pointerPath: tipCommit.pickBranch !== b.name
-        ? `M ${tipCommit.x},${y} L ${tipCommit.x},${tipCommit.y}`
-        : null,
+      mergedBack,
+      rejoinPath,
+      pointerPath,
     };
   }).filter(Boolean);
 
@@ -299,11 +328,14 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
       stemsHtml.push(`<path class="${cls}" d="${c.branchPath}"/>`);
     }
 
-    // Pointers for branches whose tip points at a commit on another lane
-    // (absorbed / merged branches). Dashed vertical line from the label
-    // position down/up to the actual commit.
+    // Rejoin curves for branches that have been merged back into main.
+    // Drawn in the stems layer so they sit beneath dots but above the
+    // main trunk line.
     for (const tip of branchTipPositions) {
-      if (tip.pointerPath) {
+      if (tip.rejoinPath) {
+        stemsHtml.push(`<path class="phy-rejoin ${categoryOf(tip.branch.name)}" d="${tip.rejoinPath}"/>`);
+      } else if (tip.pointerPath) {
+        // Fallback for pure-alias branches with no own commits: dashed stub.
         stemsHtml.push(`<path class="phy-pointer ${categoryOf(tip.branch.name)}" d="${tip.pointerPath}"/>`);
       }
     }
@@ -332,11 +364,14 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
       dotsHtml.push(`<circle class="${cls}" cx="${c.x}" cy="${c.y}" r="4" data-sha="${escAttr(c.sha)}"><title>${escAttr(tooltipFor(c))}</title></circle>`);
     }
 
-    // Branch tip dots — one per branch, at its own lane.
+    // Branch tip dots — one per branch, at its own lane. For a branch
+    // that's been merged back, the dot sits at its LAST own commit
+    // (end of its active line) rather than floating at the merge-back
+    // timestamp — the rejoin curve shows where it went after.
     for (const tip of branchTipPositions) {
       const cat = categoryOf(tip.branch.name);
       const isHighlight = highlight === tip.branch.name;
-      const cls = `phy-dot ${cat} tip${isHighlight ? ' highlight' : ''}${tip.absorbed ? ' absorbed' : ''}`;
+      const cls = `phy-dot ${cat} tip${isHighlight ? ' highlight' : ''}${tip.mergedBack ? ' merged-back' : ''}`;
       dotsHtml.push(
         `<circle class="${cls}" cx="${tip.x}" cy="${tip.y}" r="6" data-sha="${escAttr(tip.commit.sha)}" data-branch="${escAttr(tip.branch.name)}"><title>${escAttr(tooltipFor(tip.commit))}</title></circle>`
       );
@@ -344,7 +379,10 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
     gDots.innerHTML = dotsHtml.join('');
 
     // Labels: one per branch, at that branch's lane. LOD threshold on tip
-    // count — Auspice-style.
+    // count — Auspice-style. Merged-back branches get a slightly muted
+    // label (italic, lower opacity) so it's easy to scan for what's
+    // currently active vs currently at-rest-on-main. No terminal marker —
+    // a branch may sprout new commits later.
     const tipCount = branchTipPositions.length;
     const fontSize = tipCount <= 6 ? 13 : tipCount <= 15 ? 11 : tipCount <= 30 ? 10 : 0;
     const labelsHtml = [];
@@ -354,9 +392,9 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
         const display = branch.isMain ? branch.name : branch.name.replace(/^(feature|auto)\//, '');
         const cat = categoryOf(branch.name);
         const isHighlight = highlight === branch.name;
-        const cls = `phy-tip-label ${cat}${isHighlight ? ' highlight' : ''}${tip.absorbed ? ' absorbed' : ''}`;
+        const cls = `phy-tip-label ${cat}${isHighlight ? ' highlight' : ''}${tip.mergedBack ? ' merged-back' : ''}`;
         labelsHtml.push(
-          `<text class="${cls}" x="${tip.x + 10}" y="${tip.y}" dy="0.35em" font-size="${fontSize}" data-branch="${escAttr(branch.name)}">${escText(display)}${tip.absorbed ? ' ✓' : ''}</text>`
+          `<text class="${cls}" x="${tip.x + 10}" y="${tip.y}" dy="0.35em" font-size="${fontSize}" data-branch="${escAttr(branch.name)}">${escText(display)}</text>`
         );
       }
     }
