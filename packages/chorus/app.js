@@ -23,44 +23,102 @@ import { createPhylogeny, loadPhylogenyData } from './phylogeny.js';
 // Styles — defined up front so the boot path can use them without TDZ
 // ───────────────────────────────────────────────────────────────────
 const CSS_TEXT = `
-  :host { all: initial; }
-  * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-  /* Trigger pill (collapsed) */
+  :host {
+    all: initial;
+    /* Design tokens — intentionally narrow palette + tight scale. */
+    --c-bg:           #ffffff;
+    --c-bg-subtle:    #fafafa;
+    --c-bg-muted:     #f4f4f5;
+    --c-border:       #e5e7eb;
+    --c-border-strong:#d4d4d8;
+    --c-text:         #0a0a0a;
+    --c-text-muted:   #52525b;
+    --c-text-faint:   #a1a1aa;
+
+    --c-accent:       #4f46e5;
+    --c-accent-hover: #4338ca;
+    --c-accent-bg:    #eef2ff;
+    --c-accent-fg:    #4338ca;
+
+    --c-success:      #059669;
+    --c-success-bg:   #ecfdf5;
+    --c-warning:      #d97706;
+    --c-warning-bg:   #fffbeb;
+    --c-danger:       #dc2626;
+    --c-danger-bg:    #fef2f2;
+
+    --r-xs: 4px;
+    --r-sm: 6px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-xl: 20px;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 8px -2px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.04);
+    --shadow-lg: 0 24px 48px -12px rgba(0,0,0,0.14), 0 4px 8px -4px rgba(0,0,0,0.04);
+    --shadow-xl: 0 32px 64px -16px rgba(0,0,0,0.20), 0 12px 24px -8px rgba(0,0,0,0.06);
+
+    --t-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1);
+    --t-med:  220ms cubic-bezier(0.4, 0, 0.2, 1);
+
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * {
+    box-sizing: border-box;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* ── Trigger pill (collapsed) ────────────────────────────── */
   .trigger {
     position: fixed; bottom: 20px; right: 20px;
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 14px; border-radius: 20px;
-    background: #111; color: #fff; border: none;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-    font-size: 13px; cursor: pointer; pointer-events: auto;
-    transition: transform .15s ease, background .15s ease;
+    padding: 9px 14px 9px 12px; border-radius: 999px;
+    background: var(--c-text); color: var(--c-bg); border: none;
+    box-shadow: var(--shadow-lg);
+    font-size: 13px; font-weight: 500; letter-spacing: -0.005em;
+    cursor: pointer; pointer-events: auto;
+    transition: transform var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
     max-width: 340px;
   }
-  .trigger:hover { background: #222; transform: translateY(-1px); }
-  .trigger .dot {
-    width: 8px; height: 8px; border-radius: 4px; background: #666; flex-shrink: 0;
+  .trigger:hover {
+    background: #1f1f23;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-xl);
   }
-  .trigger .dot.authed { background: #4a4; }
-  .trigger .dot.working { background: #fa4; animation: pulse 1.2s ease-in-out infinite; }
+  .trigger:active { transform: translateY(0); }
+  .trigger .dot {
+    width: 8px; height: 8px; border-radius: 999px;
+    background: var(--c-text-faint); flex-shrink: 0;
+    transition: background var(--t-fast);
+  }
+  .trigger .dot.authed {
+    background: var(--c-success);
+    box-shadow: 0 0 0 2px rgba(5,150,105,0.2);
+  }
+  .trigger .dot.working {
+    background: var(--c-warning);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
   .trigger .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }
 
-  /* Panel shell */
+  /* ── Panel shell ─────────────────────────────────────────── */
   .panel {
     position: fixed; bottom: 20px; right: 20px;
     width: 420px; max-height: 82vh;
-    background: #fff; color: #111;
-    border-radius: 12px; border: 1px solid #e2e2e2;
-    box-shadow: 0 20px 48px rgba(0,0,0,0.18);
+    background: var(--c-bg); color: var(--c-text);
+    border-radius: var(--r-lg); border: 1px solid var(--c-border);
+    box-shadow: var(--shadow-xl);
     display: flex; flex-direction: column;
     pointer-events: auto;
     overflow: hidden;
-    transition: top .2s ease, bottom .2s ease, width .2s ease, max-height .2s ease;
+    transition: top var(--t-med), bottom var(--t-med), width var(--t-med), max-height var(--t-med);
   }
-  /* When the phylogeny band is visible, the panel becomes a tall right-
-     hand column alongside the iframe with a consistent gap between
-     panes (--chorus-pane-gap, 12px default). */
   .panel.with-phylogeny {
     top: 24px;
     right: 24px;
@@ -70,119 +128,183 @@ const CSS_TEXT = `
     max-width: none;
   }
 
-  /* Header */
+  /* ── Header ──────────────────────────────────────────────── */
   .header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 12px;
-    border-bottom: 1px solid #eee;
-    background: #fafafa;
+    display: flex; align-items: center; gap: 6px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--c-border);
+    background: var(--c-bg-subtle);
+    flex-shrink: 0;
   }
-  .header .back {
+  .header .back, .header .close, .header .view-toggle {
     border: none; background: transparent; cursor: pointer;
-    font-size: 16px; color: #666; padding: 2px 6px; border-radius: 4px;
+    font-size: 15px; color: var(--c-text-muted);
+    width: 26px; height: 26px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--r-sm);
+    transition: background var(--t-fast), color var(--t-fast);
   }
-  .header .back:hover { background: #eee; color: #111; }
+  .header .view-toggle { width: auto; padding: 0 8px; font-size: 13px; }
+  .header .back:hover, .header .close:hover, .header .view-toggle:hover {
+    background: var(--c-bg-muted); color: var(--c-text);
+  }
   .header .back[hidden] { display: none; }
   .header .title {
-    flex: 1; font-size: 13px; font-weight: 600;
+    flex: 1; font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+    color: var(--c-text);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .header .title code {
-    font-family: ui-monospace, monospace; font-size: 12px; font-weight: 400;
-    color: #555; background: #f0f0f0; padding: 1px 6px; border-radius: 4px;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    color: var(--c-text-muted); background: var(--c-bg-muted);
+    padding: 2px 7px; border-radius: var(--r-sm);
   }
-  .header .close {
-    border: none; background: transparent; cursor: pointer;
-    font-size: 16px; color: #888; padding: 2px 6px; border-radius: 4px;
-  }
-  .header .close:hover { background: #eee; color: #111; }
 
-  /* Body (scrollable) */
+  /* ── Body (scrollable) ───────────────────────────────────── */
   .body {
     flex: 1; overflow: auto;
     padding: 14px;
-    display: flex; flex-direction: column; gap: 10px;
-    font-size: 13px;
+    display: flex; flex-direction: column; gap: 12px;
+    font-size: 13px; line-height: 1.5;
   }
-  .body p { margin: 0; color: #333; line-height: 1.45; }
-  .body .muted { color: #666; font-size: 12px; }
-  .body .muted-s { color: #888; font-size: 11px; }
-  .body .err { padding: 8px 10px; background: #fff0f0; border: 1px solid #f0c0c0; color: #a00; border-radius: 6px; font-size: 12px; }
-  .body .ok { padding: 8px 10px; background: #f0fff3; border: 1px solid #c0e0c0; color: #060; border-radius: 6px; font-size: 12px; }
+  .body p { margin: 0; color: var(--c-text); }
+  .body .muted { color: var(--c-text-muted); font-size: 12px; }
+  .body .muted-s { color: var(--c-text-faint); font-size: 11px; }
+  .body .err {
+    padding: 10px 12px; background: var(--c-danger-bg);
+    border: 1px solid color-mix(in srgb, var(--c-danger) 25%, transparent);
+    color: var(--c-danger); border-radius: var(--r-md);
+    font-size: 12px; line-height: 1.45;
+  }
+  .body .ok {
+    padding: 10px 12px; background: var(--c-success-bg);
+    border: 1px solid color-mix(in srgb, var(--c-success) 25%, transparent);
+    color: var(--c-success); border-radius: var(--r-md);
+    font-size: 12px; line-height: 1.45;
+  }
   .body code {
-    font-family: ui-monospace, monospace; font-size: 12px;
-    background: #f0f0f0; padding: 1px 5px; border-radius: 3px;
+    font-family: var(--font-mono); font-size: 12px;
+    background: var(--c-bg-muted); color: var(--c-text);
+    padding: 1.5px 5px; border-radius: var(--r-xs);
   }
 
-  /* Action bar */
+  /* ── Action bar ──────────────────────────────────────────── */
   .action-bar {
-    padding: 10px 12px;
-    border-top: 1px solid #eee;
-    background: #fafafa;
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--c-border);
+    background: var(--c-bg-subtle);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    flex-shrink: 0;
   }
   .action-bar .secondary { display: flex; gap: 6px; flex-wrap: wrap; }
   .action-bar .secondary button {
-    background: #fff; border: 1px solid #ddd; color: #333;
-    font: inherit; font-size: 12px; cursor: pointer;
-    padding: 5px 10px; border-radius: 5px;
-    transition: background .12s ease, border-color .12s ease;
+    background: var(--c-bg); border: 1px solid var(--c-border); color: var(--c-text);
+    font: inherit; font-size: 12px; font-weight: 500;
+    cursor: pointer;
+    padding: 6px 10px; border-radius: var(--r-sm);
+    transition: background var(--t-fast), border-color var(--t-fast);
   }
   .action-bar .secondary button:hover {
-    background: #f4f4f4; border-color: #bbb;
+    background: var(--c-bg-muted); border-color: var(--c-border-strong);
   }
   .action-bar .primary {
     font: inherit; font-size: 13px; font-weight: 500;
-    padding: 8px 16px; border-radius: 6px; cursor: pointer;
-    background: #111; color: #fff; border: 1px solid #111;
+    letter-spacing: -0.005em;
+    padding: 8px 16px; border-radius: var(--r-sm);
+    cursor: pointer;
+    background: var(--c-text); color: var(--c-bg); border: 1px solid var(--c-text);
+    box-shadow: var(--shadow-sm);
+    transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
   }
-  .action-bar .primary:disabled { background: #aaa; border-color: #aaa; cursor: default; }
-  .action-bar .primary.green { background: #2a6; border-color: #2a6; }
-  .action-bar .primary:hover:not(:disabled) { background: #222; }
+  .action-bar .primary:hover:not(:disabled) {
+    background: #1f1f23;
+    box-shadow: var(--shadow-md);
+  }
+  .action-bar .primary:active:not(:disabled) { transform: translateY(1px); }
+  .action-bar .primary:disabled {
+    background: var(--c-bg-muted); color: var(--c-text-faint);
+    border-color: var(--c-border); box-shadow: none;
+    cursor: default;
+  }
+  .action-bar .primary.green {
+    background: var(--c-success); border-color: var(--c-success); color: var(--c-bg);
+  }
+  .action-bar .primary.green:hover:not(:disabled) {
+    background: #047857; border-color: #047857;
+  }
 
-  /* Form controls */
-  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #444; }
-  label.field input, label.field textarea {
-    font: inherit; font-size: 13px; padding: 7px 9px;
-    border: 1px solid #ccc; border-radius: 6px; color: #111;
-    background: #fff;
+  /* ── Form controls ───────────────────────────────────────── */
+  label.field {
+    display: flex; flex-direction: column; gap: 6px;
+    font-size: 12px; font-weight: 500; color: var(--c-text-muted);
   }
-  label.field input:focus, label.field textarea:focus {
-    outline: 2px solid #0366d6; outline-offset: -1px; border-color: #0366d6;
+  label.field input, label.field textarea, label.field select {
+    font: inherit; font-size: 13px; font-weight: 400;
+    padding: 8px 10px;
+    border: 1px solid var(--c-border); border-radius: var(--r-sm);
+    color: var(--c-text); background: var(--c-bg);
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
   }
-  label.field textarea { min-height: 64px; resize: vertical; }
+  label.field input::placeholder, label.field textarea::placeholder {
+    color: var(--c-text-faint);
+  }
+  label.field input:focus, label.field textarea:focus, label.field select:focus {
+    outline: none;
+    border-color: var(--c-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-accent) 15%, transparent);
+  }
+  label.field textarea { min-height: 72px; resize: vertical; line-height: 1.5; }
   input[type="password"].key-input {
-    font-family: ui-monospace, monospace; font-size: 12px;
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.05em;
   }
 
-  /* Branch list */
+  /* ── Branch list ─────────────────────────────────────────── */
   .branch-list { display: flex; flex-direction: column; gap: 1px; }
   .branch {
     display: flex; align-items: center; gap: 10px;
-    padding: 8px 10px; border-radius: 6px; cursor: pointer;
-    transition: background .08s ease;
+    padding: 9px 10px; border-radius: var(--r-sm); cursor: pointer;
+    transition: background var(--t-fast);
   }
-  .branch:hover { background: #f5f5f5; }
-  .branch.active { background: #eaf4ff; }
-  .branch .name { flex: 1; font-family: ui-monospace, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .branch .sha { font-family: ui-monospace, monospace; font-size: 11px; color: #999; }
+  .branch:hover { background: var(--c-bg-muted); }
+  .branch.active {
+    background: var(--c-accent-bg);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-accent) 25%, transparent);
+  }
+  .branch .name {
+    flex: 1; font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    color: var(--c-text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .branch .sha {
+    font-family: var(--font-mono); font-size: 11px; color: var(--c-text-faint);
+  }
   .branch .marker {
-    font-size: 10px; padding: 1px 6px; border-radius: 6px;
-    text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;
+    font-size: 9.5px; padding: 2px 7px; border-radius: var(--r-xs);
+    text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em;
+    line-height: 1.4;
   }
-  .branch .marker.main { background: #222; color: #fff; }
-  .branch .marker.feature { background: #e6f4ff; color: #0366d6; }
-  .branch .marker.auto { background: #fff4e6; color: #a60; }
-  .section-heading { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin: 6px 0 2px; }
+  .branch .marker.main { background: var(--c-text); color: var(--c-bg); }
+  .branch .marker.feature { background: var(--c-accent-bg); color: var(--c-accent-fg); }
+  .branch .marker.auto { background: var(--c-warning-bg); color: var(--c-warning); }
+  .section-heading {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--c-text-faint);
+    margin: 10px 0 4px;
+  }
 
   /* In-panel tree-view intro card (phylogeny itself is in the band) */
   .tree-hint {
-    padding: 12px;
-    background: #f8fbff;
-    border: 1px solid #d0e4ff;
-    border-radius: 8px;
+    padding: 14px;
+    background: var(--c-accent-bg);
+    border: 1px solid color-mix(in srgb, var(--c-accent) 20%, transparent);
+    border-radius: var(--r-md);
   }
-  .tree-hint-title { font-weight: 600; color: #0366d6; font-size: 13px; margin-bottom: 4px; }
+  .tree-hint-title {
+    font-weight: 600; color: var(--c-accent-fg);
+    font-size: 13px; margin-bottom: 4px;
+    letter-spacing: -0.01em;
+  }
 
   /* Phylogeny tree (legacy in-panel version; unused in tree mode now
      that the phylogeny lives in the band, but kept for reference if we
@@ -266,17 +388,17 @@ const CSS_TEXT = `
     position: fixed;
     top: calc(24px + var(--chorus-top-height, 66vh) + var(--chorus-pane-gap, 12px));
     left: 24px;
-    right: 24px; /* full-width: panel is a tall column above us, not beside */
+    right: 24px;
     bottom: 24px;
-    background: rgba(255,255,255,0.94);
-    border: 1px solid #e2e2e2;
-    border-radius: 10px;
-    box-shadow: 0 20px 48px rgba(0,0,0,0.1);
+    background: rgba(255,255,255,0.96);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-xl);
     pointer-events: auto;
     overflow: hidden;
     display: none;
     min-height: 140px;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(8px);
   }
 
   /* Horizontal resize handle centred in the gap between top row and
@@ -304,7 +426,7 @@ const CSS_TEXT = `
   }
   .chorus-resize-h:hover::after,
   .chorus-resize-h.dragging::after {
-    background: #0366d6;
+    background: var(--c-accent);
   }
 
   /* Vertical resize handle centred in the gap between iframe and panel. */
@@ -326,55 +448,66 @@ const CSS_TEXT = `
     left: calc(50% - 1px); top: 20%; bottom: 20%; width: 2px;
     background: transparent;
     border-radius: 1px;
-    transition: background .12s ease;
+    transition: background var(--t-fast);
   }
   .chorus-resize-v:hover::after,
   .chorus-resize-v.dragging::after {
-    background: #0366d6;
+    background: var(--c-accent);
   }
   .phylogeny-host.active { display: block; }
   .phylogeny-header {
     position: absolute; top: 0; left: 0; right: 0;
-    padding: 8px 14px; display: flex; align-items: center; gap: 10px;
-    font-size: 11px; color: #666; font-family: system-ui, sans-serif;
-    border-bottom: 1px solid #eee; background: #fafafa;
+    padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+    font-size: 11px; color: var(--c-text-muted);
+    font-family: var(--font-sans);
+    border-bottom: 1px solid var(--c-border);
+    background: var(--c-bg-subtle);
     z-index: 2;
   }
-  .phylogeny-header .title { font-weight: 600; color: #333; }
-  .phylogeny-header .count { color: #888; }
-  .phylogeny-header .loading { color: #0366d6; font-style: italic; }
+  .phylogeny-header .title {
+    font-weight: 600; color: var(--c-text);
+    font-size: 12px; letter-spacing: -0.01em;
+  }
+  .phylogeny-header .count { color: var(--c-text-faint); font-family: var(--font-mono); font-size: 11px; }
+  .phylogeny-header .loading { color: var(--c-accent); font-style: italic; }
   .phylogeny-header .phy-reset {
     margin-left: auto;
-    border: 1px solid #ddd; background: #fff; color: #333;
-    font: inherit; font-size: 11px;
-    padding: 3px 8px; border-radius: 5px; cursor: pointer;
-    transition: background .1s ease;
+    border: 1px solid var(--c-border); background: var(--c-bg); color: var(--c-text);
+    font: inherit; font-size: 11px; font-weight: 500;
+    padding: 4px 9px; border-radius: var(--r-sm); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast);
   }
-  .phylogeny-header .phy-reset:hover { background: #f4f4f4; }
+  .phylogeny-header .phy-reset:hover {
+    background: var(--c-bg-muted); border-color: var(--c-border-strong);
+  }
   .phylogeny-body {
-    position: absolute; top: 32px; left: 0; right: 0; bottom: 0;
+    position: absolute; top: 40px; left: 0; right: 0; bottom: 0;
   }
   .phy-tooltip {
     position: absolute;
-    padding: 6px 10px;
-    background: #111; color: #fff;
-    font-size: 11px; line-height: 1.4;
-    border-radius: 4px;
+    padding: 8px 10px;
+    background: var(--c-text); color: var(--c-bg);
+    font-size: 11px; line-height: 1.5;
+    border-radius: var(--r-sm);
     pointer-events: none;
     white-space: pre-wrap;
-    max-width: 280px;
+    max-width: 300px;
     z-index: 10;
-    font-family: system-ui, sans-serif;
+    font-family: var(--font-sans);
+    box-shadow: var(--shadow-md);
   }
-  .phylogeny-svg text { pointer-events: auto; cursor: pointer; user-select: none; font-family: system-ui, sans-serif; }
+  .phylogeny-svg text {
+    pointer-events: auto; cursor: pointer; user-select: none;
+    font-family: var(--font-sans);
+  }
 
-  .phy-stem { fill: none; stroke: #bbb; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .phy-stem.main { stroke: #111; stroke-width: 3; }
-  .phy-stem.feature { stroke: #0366d6; }
-  .phy-stem.auto { stroke: #e8a030; }
-  .phy-stem.misc { stroke: #888; }
+  .phy-stem { fill: none; stroke: var(--c-text-faint); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .phy-stem.main { stroke: var(--c-text); stroke-width: 2.5; }
+  .phy-stem.feature { stroke: var(--c-accent); }
+  .phy-stem.auto { stroke: var(--c-warning); }
+  .phy-stem.misc { stroke: var(--c-text-faint); }
 
-  .phy-merge { fill: none; stroke: #888; stroke-width: 1.5; stroke-dasharray: 3,3; opacity: 0.7; }
+  .phy-merge { fill: none; stroke: var(--c-text-faint); stroke-width: 1.5; stroke-dasharray: 3,3; opacity: 0.7; }
 
   /* Rejoin: right-angle elbow from branch's last own commit back down into
      main at the merge commit. Matches the stem style (same stroke-width,
@@ -383,143 +516,191 @@ const CSS_TEXT = `
     fill: none; stroke-width: 2; opacity: 0.85;
     stroke-linecap: round; stroke-linejoin: round;
   }
-  .phy-rejoin.feature { stroke: #0366d6; }
-  .phy-rejoin.auto { stroke: #e8a030; }
-  .phy-rejoin.misc { stroke: #888; }
+  .phy-rejoin.feature { stroke: var(--c-accent); }
+  .phy-rejoin.auto { stroke: var(--c-warning); }
+  .phy-rejoin.misc { stroke: var(--c-text-faint); }
 
-  /* Pointer: fallback dashed stub for branches that have no own commits
-     (pure aliases that never diverged). Rare; rejoin handles most cases. */
+  /* Pointer: fallback dashed stub for branches that have no own commits. */
   .phy-pointer { fill: none; stroke-width: 1.5; stroke-dasharray: 2,3; opacity: 0.5; }
-  .phy-pointer.feature { stroke: #0366d6; }
-  .phy-pointer.auto { stroke: #e8a030; }
-  .phy-pointer.misc { stroke: #888; }
+  .phy-pointer.feature { stroke: var(--c-accent); }
+  .phy-pointer.auto { stroke: var(--c-warning); }
+  .phy-pointer.misc { stroke: var(--c-text-faint); }
 
-  .phy-dot { cursor: pointer; stroke: #fff; stroke-width: 2; transition: r 0.1s ease; }
-  .phy-dot.main { fill: #111; }
-  .phy-dot.feature { fill: #0366d6; }
-  .phy-dot.auto { fill: #e8a030; }
-  .phy-dot.misc { fill: #888; }
+  .phy-dot { cursor: pointer; stroke: #fff; stroke-width: 2; transition: r var(--t-fast); }
+  .phy-dot.main { fill: var(--c-text); }
+  .phy-dot.feature { fill: var(--c-accent); }
+  .phy-dot.auto { fill: var(--c-warning); }
+  .phy-dot.misc { fill: var(--c-text-faint); }
   .phy-dot.merge { stroke-dasharray: 2,2; }
-  .phy-dot.merged-back { opacity: 0.75; }
+  .phy-dot.merged-back { opacity: 0.7; }
   .phy-dot:hover { r: 8; }
-  .phy-dot.highlight { stroke: #000; stroke-width: 3; filter: drop-shadow(0 0 6px rgba(3,102,214,0.5)); }
+  .phy-dot.highlight {
+    stroke: var(--c-text); stroke-width: 3;
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--c-accent) 50%, transparent));
+  }
 
-  .phy-tip-label { fill: #333; font-weight: 500; }
-  .phy-tip-label.main { fill: #111; font-weight: 600; }
-  .phy-tip-label.feature { fill: #0366d6; }
-  .phy-tip-label.auto { fill: #a86a10; }
-  .phy-tip-label.misc { fill: #666; }
+  .phy-tip-label { fill: var(--c-text); font-weight: 500; font-size: 11px; letter-spacing: -0.005em; }
+  .phy-tip-label.main { fill: var(--c-text); font-weight: 600; }
+  .phy-tip-label.feature { fill: var(--c-accent); }
+  .phy-tip-label.auto { fill: var(--c-warning); }
+  .phy-tip-label.misc { fill: var(--c-text-muted); }
   .phy-tip-label.highlight { font-weight: 700; text-decoration: underline; }
-  .phy-tip-label.merged-back { opacity: 0.65; font-style: italic; }
-  .phy-tip-label:hover { fill: #000; text-decoration: underline; }
+  .phy-tip-label.merged-back { opacity: 0.6; font-style: italic; }
+  .phy-tip-label:hover { fill: var(--c-text); text-decoration: underline; }
 
-  /* Header view-mode toggle */
-  .header .view-toggle {
-    border: 1px solid #ddd; background: #fff; cursor: pointer;
-    font-size: 14px; color: #666;
-    padding: 3px 8px; border-radius: 5px;
-    transition: background .1s ease, color .1s ease;
+
+  /* Inline link-style buttons (used in header strips etc.) */
+  .link-btn {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--c-accent); font: inherit; font-size: 11px; font-weight: 500;
+    padding: 2px 4px; border-radius: var(--r-xs);
+    transition: background var(--t-fast);
   }
-  .header .view-toggle:hover { background: #f4f4f4; color: #111; }
+  .link-btn:hover { background: var(--c-accent-bg); }
+  .link-btn.sm { font-size: 10.5px; }
 
-
-  /* Capture card */
+  /* Capture card — selected-element preview */
   .capture {
-    padding: 8px; border-radius: 6px;
-    font-family: ui-monospace, monospace; font-size: 11px;
-    background: #f4f4f4; color: #444; word-break: break-all;
-    max-height: 70px; overflow: auto;
+    padding: 10px 12px; border-radius: var(--r-sm);
+    font-family: var(--font-mono); font-size: 11px;
+    background: var(--c-bg-muted); color: var(--c-text-muted);
+    border: 1px solid var(--c-border);
+    word-break: break-all;
+    max-height: 72px; overflow: auto;
+    line-height: 1.5;
   }
-  .capture.empty { color: #999; font-style: italic; font-family: inherit; }
+  .capture.empty {
+    color: var(--c-text-faint); font-style: italic;
+    font-family: var(--font-sans);
+  }
 
   /* AI log */
   .log {
-    font-family: ui-monospace, monospace; font-size: 11px;
-    padding: 8px; background: #fafafa; border: 1px solid #eee; border-radius: 6px;
-    max-height: 200px; overflow: auto;
-    display: flex; flex-direction: column; gap: 2px;
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
+    padding: 10px 12px;
+    background: var(--c-bg-subtle);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    max-height: 220px; overflow: auto;
+    display: flex; flex-direction: column; gap: 3px;
   }
   .log-line { white-space: pre-wrap; word-break: break-word; }
-  .log-line.muted { color: #888; }
+  .log-line.muted { color: var(--c-text-faint); }
 
   /* Device-flow code */
   .device-code {
-    font-family: ui-monospace, monospace; font-size: 22px; font-weight: 600;
-    padding: 14px; background: #111; color: #fff; border-radius: 8px;
-    text-align: center; letter-spacing: 3px; user-select: all;
+    font-family: var(--font-mono); font-size: 22px; font-weight: 600;
+    padding: 16px; background: var(--c-text); color: var(--c-bg);
+    border-radius: var(--r-md);
+    text-align: center; letter-spacing: 0.2em; user-select: all;
   }
 
   /* Who strip */
-  .who { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #555; }
-  .who img { width: 18px; height: 18px; border-radius: 9px; }
+  .who {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--c-text-muted);
+  }
+  .who img { width: 20px; height: 20px; border-radius: 999px; border: 1px solid var(--c-border); }
 
   /* Issue block */
   .issue {
-    border: 1px solid #eee; border-radius: 8px; padding: 10px;
-    background: #fcfcfc;
-    display: flex; flex-direction: column; gap: 6px;
+    border: 1px solid var(--c-border); border-radius: var(--r-md);
+    padding: 12px; background: var(--c-bg);
+    display: flex; flex-direction: column; gap: 8px;
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
   }
+  .issue:hover { border-color: var(--c-border-strong); box-shadow: var(--shadow-sm); }
   .issue-hdr { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-  .issue-hdr .n { color: #888; font-family: ui-monospace, monospace; font-size: 11px; }
-  .issue-hdr .t { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; }
-  .issue-hdr .st {
-    font-size: 10px; padding: 2px 6px; border-radius: 6px;
-    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+  .issue-hdr .n { color: var(--c-text-faint); font-family: var(--font-mono); font-size: 11px; }
+  .issue-hdr .t {
+    font-weight: 600; flex: 1; letter-spacing: -0.01em;
+    overflow: hidden; text-overflow: ellipsis;
   }
-  .issue-hdr .st.open { background: #e6ffe6; color: #060; }
-  .issue-hdr .st.closed { background: #eee; color: #555; }
+  .issue-hdr .st {
+    font-size: 10px; padding: 2px 7px; border-radius: var(--r-xs);
+    text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+  }
+  .issue-hdr .st.open { background: var(--c-success-bg); color: var(--c-success); }
+  .issue-hdr .st.closed { background: var(--c-bg-muted); color: var(--c-text-muted); }
   .issue-body {
-    padding: 6px 8px; border-radius: 4px;
-    background: #fff; border: 1px solid #f0f0f0;
-    font-size: 11px; color: #333;
-    max-height: 80px; overflow: auto;
+    padding: 8px 10px; border-radius: var(--r-sm);
+    background: var(--c-bg-subtle); border: 1px solid var(--c-border);
+    font-size: 11px; line-height: 1.55; color: var(--c-text);
+    max-height: 88px; overflow: auto;
     white-space: pre-wrap; word-break: break-word;
   }
   .issue-actions { display: flex; gap: 8px; align-items: center; font-size: 11px; }
   .vote {
-    display: inline-flex; align-items: center; gap: 4px;
-    background: #fff; border: 1px solid #ddd; border-radius: 14px;
-    padding: 2px 10px; cursor: pointer; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--c-bg); border: 1px solid var(--c-border);
+    border-radius: 999px; color: var(--c-text);
+    padding: 3px 10px; cursor: pointer; font-size: 12px; font-weight: 500;
+    transition: background var(--t-fast), border-color var(--t-fast);
   }
-  .vote:hover:not(:disabled) { background: #f4f4f4; }
+  .vote:hover:not(:disabled) {
+    background: var(--c-bg-muted); border-color: var(--c-border-strong);
+  }
   .vote:disabled { opacity: 0.5; cursor: default; }
   .comments-btn {
-    background: transparent; border: none; color: #0366d6; font-size: 11px; cursor: pointer; padding: 2px 4px;
+    background: transparent; border: none; color: var(--c-accent);
+    font: inherit; font-size: 11px; font-weight: 500;
+    cursor: pointer; padding: 3px 6px; border-radius: var(--r-xs);
+    transition: background var(--t-fast);
   }
+  .comments-btn:hover { background: var(--c-accent-bg); }
   .comments {
-    margin-top: 4px; border-top: 1px solid #f0f0f0; padding-top: 6px;
-    display: flex; flex-direction: column; gap: 6px;
+    margin-top: 4px; border-top: 1px solid var(--c-border); padding-top: 8px;
+    display: flex; flex-direction: column; gap: 8px;
   }
   .comment {
-    padding: 6px 8px; border-radius: 4px; background: #fff; border: 1px solid #f0f0f0;
-    font-size: 11px;
+    padding: 8px 10px; border-radius: var(--r-sm);
+    background: var(--c-bg-subtle); border: 1px solid var(--c-border);
+    font-size: 11px; line-height: 1.55;
   }
-  .comment-hdr { font-size: 10px; color: #666; display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
-  .comment-hdr img { width: 14px; height: 14px; border-radius: 7px; }
-  .comment-body { color: #222; white-space: pre-wrap; word-break: break-word; }
-  .compose textarea { min-height: 40px; font-size: 12px; }
+  .comment-hdr {
+    font-size: 10px; color: var(--c-text-muted);
+    display: flex; align-items: center; gap: 5px; margin-bottom: 4px;
+  }
+  .comment-hdr img { width: 14px; height: 14px; border-radius: 999px; }
+  .comment-body { color: var(--c-text); white-space: pre-wrap; word-break: break-word; }
+  .compose textarea { min-height: 44px; font-size: 12px; }
   .compose-actions { display: flex; justify-content: flex-end; gap: 6px; }
 
   /* Overlay + hint (element picker on host page) */
   .overlay {
     position: fixed; pointer-events: none;
-    border: 2px solid #c33; background: rgba(204,51,51,0.08);
+    border: 2px solid var(--c-accent);
+    background: color-mix(in srgb, var(--c-accent) 10%, transparent);
     z-index: 2147483645; transition: all .05s linear;
+    border-radius: var(--r-xs);
   }
   .hint {
-    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-    background: #111; color: #fff; padding: 6px 12px; border-radius: 6px;
-    font-size: 12px; pointer-events: none;
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--c-text); color: var(--c-bg);
+    padding: 8px 14px; border-radius: 999px;
+    font-size: 12px; font-weight: 500;
+    pointer-events: none;
+    box-shadow: var(--shadow-lg);
   }
 
   /* Feature banner */
   .feature-banner {
-    padding: 8px 10px; border-radius: 6px; font-size: 12px;
-    background: #fff8e1; border: 1px solid #ffd77a;
+    padding: 10px 12px; border-radius: var(--r-md); font-size: 12px; line-height: 1.45;
+    background: var(--c-warning-bg);
+    border: 1px solid color-mix(in srgb, var(--c-warning) 25%, transparent);
+    color: var(--c-warning);
     display: flex; flex-direction: column; gap: 4px;
   }
-  .feature-banner.ok { background: #f0fff3; border-color: #c0e0c0; }
-  .feature-banner.err { background: #fff0f0; border-color: #f0c0c0; color: #a00; }
+  .feature-banner.ok {
+    background: var(--c-success-bg);
+    border-color: color-mix(in srgb, var(--c-success) 25%, transparent);
+    color: var(--c-success);
+  }
+  .feature-banner.err {
+    background: var(--c-danger-bg);
+    border-color: color-mix(in srgb, var(--c-danger) 25%, transparent);
+    color: var(--c-danger);
+  }
 `;
 
 // ───────────────────────────────────────────────────────────────────
@@ -597,16 +778,17 @@ function bootPreviewMode() {
     // invisible when hovering inside the popover.
     overlay = document.createElement('div');
     overlay.style.cssText =
-      'position:fixed; pointer-events:none; border:2px solid #c33; ' +
-      'background:rgba(204,51,51,0.08); z-index:2147483647; ' +
+      'position:fixed; pointer-events:none; border:2px solid #4f46e5; ' +
+      'background:rgba(79,70,229,0.10); border-radius:4px; z-index:2147483647; ' +
       'transition:all .05s linear; display:none;';
     document.body.appendChild(overlay);
     hint = document.createElement('div');
     hint.style.cssText =
-      'position:fixed; top:16px; left:50%; transform:translateX(-50%); ' +
-      'background:#111; color:#fff; padding:6px 12px; border-radius:6px; ' +
-      'font-size:12px; pointer-events:none; z-index:2147483647; ' +
-      'font-family:system-ui,sans-serif;';
+      'position:fixed; top:20px; left:50%; transform:translateX(-50%); ' +
+      'background:#0a0a0a; color:#fff; padding:8px 14px; border-radius:999px; ' +
+      'font-size:12px; font-weight:500; pointer-events:none; z-index:2147483647; ' +
+      'box-shadow:0 24px 48px -12px rgba(0,0,0,0.2); ' +
+      'font-family:Inter,-apple-system,system-ui,sans-serif;';
     hint.textContent = 'Click any element · Esc to cancel';
     document.body.appendChild(hint);
     document.addEventListener('mousemove', onHover, true);
@@ -1711,7 +1893,7 @@ function boot({ inIframe = false } = {}) {
       : 'nothing selected';
     const modelInUse = state.openaiModel || DEFAULT_MODEL;
     return `
-      <div class="muted-s">Model: <code>${esc(modelInUse)}</code> · <button style="background:transparent;border:none;color:#0366d6;cursor:pointer;padding:0;font-size:11px;" data-action="goto-settings">change</button></div>
+      <div class="muted-s">Model: <code>${esc(modelInUse)}</code> · <button class="link-btn" data-action="goto-settings">change</button></div>
       ${s.summary ? `<div class="ok"><strong>Last turn:</strong> ${esc(s.summary)}</div>` : ''}
       ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}
       ${s.events?.length ? `<div class="log">${s.events.map(renderAiEvent).join('')}${s.status === 'committing' ? '<div class="log-line muted">⏳ committing…</div>' : ''}</div>` : ''}
@@ -1828,7 +2010,7 @@ function boot({ inIframe = false } = {}) {
         <div class="muted-s">OpenAI key</div>
         <div style="display:flex; align-items:center; gap:8px; margin-top:3px;">
           <span class="capture">${state.openaiKey ? '●●●●●●●●' + esc(state.openaiKey.slice(-4)) : '(none set)'}</span>
-          ${state.openaiKey ? `<button data-action="clear-key" style="background:transparent; border:none; color:#a00; cursor:pointer; font-size:12px;">Clear</button>` : ''}
+          ${state.openaiKey ? `<button data-action="clear-key" class="link-btn" style="color:var(--c-danger);">Clear</button>` : ''}
         </div>
       </div>
       <label class="field">
@@ -2666,13 +2848,13 @@ function boot({ inIframe = false } = {}) {
   // ═══════════════════════════════════════════════════════════════
   function whoHtml() {
     if (!auth.isAuthed() || !state.user) {
-      return `<div class="who">Not signed in · <button style="background:transparent;border:none;color:#0366d6;cursor:pointer;padding:0;font-size:12px;" data-action="sign-in">Sign in with GitHub</button></div>`;
+      return `<div class="who">Not signed in · <button class="link-btn" data-action="sign-in">Sign in with GitHub</button></div>`;
     }
     return `
       <div class="who">
         <img src="${esc(state.user.avatar_url)}" alt="" />
         <span>Signed in as <strong>${esc(state.user.login)}</strong></span>
-        <button style="background:transparent;border:none;color:#0366d6;cursor:pointer;padding:0 0 0 8px;font-size:11px;margin-left:auto;" data-action="goto-settings">Settings</button>
+        <button class="link-btn" style="margin-left:auto;" data-action="goto-settings">Settings</button>
       </div>
     `;
   }
