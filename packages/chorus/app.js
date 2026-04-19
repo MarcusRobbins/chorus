@@ -193,7 +193,7 @@ const CSS_TEXT = `
   .menu {
     position: absolute;
     top: calc(100% + 6px);
-    right: 0;
+    left: 0;
     min-width: 200px;
     padding: 6px;
     background: var(--c-bg);
@@ -1834,14 +1834,14 @@ function boot({ inIframe = false } = {}) {
     const el = document.createElement('div');
     el.className = 'header';
     el.innerHTML = `
-      <button class="back" ${canBack ? '' : 'hidden'} data-action="back" title="Back">←</button>
-      <div class="title">${title}</div>
       ${showMenu ? `
         <div class="menu-wrap">
           <button class="menu-btn" data-action="toggle-menu" title="Menu" aria-expanded="${state.menuOpen ? 'true' : 'false'}">☰</button>
           ${state.menuOpen ? menuHtml() : ''}
         </div>
       ` : ''}
+      <button class="back" ${canBack ? '' : 'hidden'} data-action="back" title="Back">←</button>
+      <div class="title">${title}</div>
       <button class="close" data-action="close" title="Close">✕</button>
     `;
     return el;
