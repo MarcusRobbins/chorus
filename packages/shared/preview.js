@@ -24,8 +24,12 @@ const STYLE_CONSTANT =
 function applyMode(iframe, windowed) {
   const s = iframe.style;
   if (windowed) {
+    // Height reads from a CSS variable on :root so the top-row resize
+    // handle in chorus can drag the iframe + panel + phylogeny split
+    // in unison. Default 66vh.
     s.top = '24px'; s.left = '24px'; s.right = 'auto'; s.bottom = 'auto';
-    s.width = '62vw'; s.height = '66vh';
+    s.width = 'var(--chorus-top-width, 62vw)';
+    s.height = 'var(--chorus-top-height, 66vh)';
     s.borderRadius = '10px';
     s.borderWidth = '1px'; s.borderStyle = 'solid'; s.borderColor = '#bbb';
     s.boxShadow = '0 20px 48px rgba(0,0,0,0.2)';

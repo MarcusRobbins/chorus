@@ -59,12 +59,13 @@ const CSS_TEXT = `
     transition: top .2s ease, bottom .2s ease, width .2s ease, max-height .2s ease;
   }
   /* When the phylogeny band is visible, the panel becomes a tall right-
-     hand column from the top of the viewport down to just above the
-     phylogeny. Gives the feature/AI screens more vertical room AND lets
-     the phylogeny span the full width of the screen below the iframe. */
+     hand column from the top of the viewport down to the top of the
+     phylogeny band (edges touching — no gap). The --chorus-top-height
+     CSS variable is shared with the iframe + phylogeny so the resize
+     handle can adjust all three in unison. */
   .panel.with-phylogeny {
-    top: 20px;
-    bottom: calc(34vh - 40px); /* matches phylogeny-top at calc(24px + 66vh + 24px), minus gap */
+    top: 24px;
+    bottom: calc(100vh - 24px - var(--chorus-top-height, 66vh));
     max-height: none;
   }
 
@@ -262,7 +263,7 @@ const CSS_TEXT = `
   /* Phylogeny — floating horizontal band under the iframe */
   .phylogeny-host {
     position: fixed;
-    top: calc(24px + 66vh + 24px);
+    top: calc(24px + var(--chorus-top-height, 66vh));
     left: 24px;
     right: 24px; /* full-width: panel is a tall column above us, not beside */
     bottom: 24px;
@@ -275,6 +276,35 @@ const CSS_TEXT = `
     display: none;
     min-height: 140px;
     backdrop-filter: blur(4px);
+  }
+
+  /* Horizontal resize handle between top row (iframe + panel) and the
+     phylogeny. Dragging up grows phylogeny; down grows iframe/panel.
+     Hit target is 10px tall; visible indicator is thinner and only
+     highlights on hover/drag. */
+  .chorus-resize-h {
+    position: fixed;
+    top: calc(24px + var(--chorus-top-height, 66vh) - 4px);
+    left: 24px;
+    right: 24px;
+    height: 8px;
+    cursor: row-resize;
+    pointer-events: auto;
+    z-index: 2147483641;
+    display: none;
+  }
+  .chorus-resize-h.active { display: block; }
+  .chorus-resize-h::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 0; right: 0; height: 2px;
+    background: transparent;
+    border-radius: 1px;
+    transition: background .1s ease;
+  }
+  .chorus-resize-h:hover::after,
+  .chorus-resize-h.dragging::after {
+    background: #0366d6;
   }
   .phylogeny-host.active { display: block; }
   .phylogeny-header {
@@ -805,6 +835,56 @@ function boot({ inIframe = false } = {}) {
   phyHost.appendChild(phyBody);
   root.appendChild(phyHost);
 
+  // Resize handle for the horizontal split between iframe/panel and
+  // phylogeny. Updates --chorus-top-height on document.documentElement
+  // so the iframe (via preview.js), panel, and phylogeny all move in
+  // unison.
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'chorus-resize-h';
+  root.appendChild(resizeHandle);
+
+  // Show/hide the handle alongside the phylogeny band.
+  function updateResizeHandleVisibility() {
+    resizeHandle.classList.toggle('active', wantPhyVisible());
+  }
+
+  // Drag logic.
+  let dragStartY = 0;
+  let dragStartHeight = 0;
+  let dragging = false;
+  resizeHandle.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    dragStartY = e.clientY;
+    // Resolve current --chorus-top-height in pixels (might be '66vh' by
+    // default, which we convert through getBoundingClientRect on the
+    // iframe if it exists).
+    const iframe = document.getElementById('oss-kanban-preview-iframe');
+    dragStartHeight = iframe
+      ? iframe.getBoundingClientRect().height
+      : window.innerHeight * 0.66;
+    resizeHandle.classList.add('dragging');
+    resizeHandle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizeHandle.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dy = e.clientY - dragStartY;
+    const min = window.innerHeight * 0.2;
+    const max = window.innerHeight * 0.85;
+    const next = Math.max(min, Math.min(max, dragStartHeight + dy));
+    document.documentElement.style.setProperty('--chorus-top-height', next + 'px');
+    // Let d3-zoom's svg resize observer re-layout phylogeny:
+    phylogeny?.resize();
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    resizeHandle.classList.remove('dragging');
+    try { resizeHandle.releasePointerCapture(e.pointerId); } catch {}
+  };
+  resizeHandle.addEventListener('pointerup', endDrag);
+  resizeHandle.addEventListener('pointercancel', endDrag);
+
   let phylogeny = null; // lazily created on first show
   let phyData = null;   // { commits, branches, mainName }
   let phyLoading = false;
@@ -853,6 +933,7 @@ function boot({ inIframe = false } = {}) {
   function renderPhylogeny() {
     const visible = wantPhyVisible();
     phyHost.classList.toggle('active', visible);
+    updateResizeHandleVisibility();
     if (!visible) return;
     if (!phyData) {
       updatePhyHeader(phyLoading ? 'loading commit history…' : 'no data yet');
