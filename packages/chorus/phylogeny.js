@@ -133,18 +133,15 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     c.pickBranch = branchOrder.find((bn) => c.refs.has(bn)) || mainName;
   }
 
-  // Lane assignment: main first (center), then feature branches alternating
-  // above and below, then auto, then misc. Lane 0 = center; negative =
-  // above, positive = below. Visual spread makes main the obvious trunk.
+  // Lane assignment: main at the bottom (visual "trunk / foundation"),
+  // feature branches stacked above it. Simple stable order by branch list
+  // (features first, then autos, then misc — whatever the caller passed).
+  // The metaphor is that features *grow up and out of* main, rather than
+  // hanging off it symmetrically — reads as evolution / accretion.
   const lanes = new Map();
-  lanes.set(mainName, 0);
   const nonMain = branches.filter((b) => !b.isMain);
-  // Alternate above / below for visual spread.
-  nonMain.forEach((b, i) => {
-    const sign = i % 2 === 0 ? -1 : 1;
-    const offset = Math.ceil((i + 1) / 2);
-    lanes.set(b.name, sign * offset);
-  });
+  nonMain.forEach((b, i) => lanes.set(b.name, i));
+  lanes.set(mainName, nonMain.length); // bottom-most lane
 
   // Time scale: oldest commit → left, newest → right. Add a small pad on
   // the left for the tip labels room; right pad for branch-tip labels.
@@ -176,6 +173,30 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     c.lane = lanes.get(c.pickBranch) ?? 0;
     c.y = yScale(c.lane);
   }
+
+  // Branch tip positions — each branch gets its OWN lane for its tip dot +
+  // label, even if the underlying commit lives on another branch's lane
+  // (i.e., the branch has been merged / absorbed). When the tip's lane
+  // differs from its commit's pickBranch lane, we'll draw a dashed pointer
+  // down to the commit's actual position so it's visually clear where that
+  // branch points.
+  const branchTipPositions = branches.map((b) => {
+    const tipCommit = commits.get(b.tipSha);
+    if (!tipCommit) return null;
+    const lane = lanes.get(b.name) ?? 0;
+    const y = yScale(lane);
+    return {
+      branch: b,
+      commit: tipCommit,
+      x: tipCommit.x,
+      y,
+      lane,
+      absorbed: tipCommit.pickBranch !== b.name, // branch points at commit that lives on a different branch's lane
+      pointerPath: tipCommit.pickBranch !== b.name
+        ? `M ${tipCommit.x},${y} L ${tipCommit.x},${tipCommit.y}`
+        : null,
+    };
+  }).filter(Boolean);
 
   // Compute branch-path strings per commit. For a commit with parents, we
   // draw a stem from its primary parent to itself. The stem is:
@@ -214,7 +235,7 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     }
   }
 
-  return { xScale, yScale, laneCount, rowHeight };
+  return { xScale, yScale, laneCount, rowHeight, branchTipPositions };
 }
 
 // ── Render ────────────────────────────────────────────────────────
@@ -261,7 +282,7 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
     svg.setAttribute('width', width);
     svg.setAttribute('height', height);
 
-    const { xScale } = computeLayout(data, { width, height });
+    const { xScale, branchTipPositions } = computeLayout(data, { width, height });
     if (!xScale) {
       gStems.innerHTML = '';
       gMerges.innerHTML = '';
@@ -277,6 +298,15 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
       const cls = 'phy-stem' + (c.pickBranch === 'main' ? ' main' : ` ${categoryOf(c.pickBranch)}`);
       stemsHtml.push(`<path class="${cls}" d="${c.branchPath}"/>`);
     }
+
+    // Pointers for branches whose tip points at a commit on another lane
+    // (absorbed / merged branches). Dashed vertical line from the label
+    // position down/up to the actual commit.
+    for (const tip of branchTipPositions) {
+      if (tip.pointerPath) {
+        stemsHtml.push(`<path class="phy-pointer ${categoryOf(tip.branch.name)}" d="${tip.pointerPath}"/>`);
+      }
+    }
     gStems.innerHTML = stemsHtml.join('');
 
     // Merges.
@@ -288,42 +318,45 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
     }
     gMerges.innerHTML = mergeHtml.join('');
 
-    // Dots — only for branch tips and merge commits in v1 (straight-line
-    // commits stay invisible so the lane reads as a continuous line). Will
-    // make every commit a dot later if needed.
+    // Commit dots — v1 shows only merge commits here. Branch tips get
+    // their own dots in a separate pass below (they may sit on a lane
+    // different from the underlying commit's pickBranch lane).
     const dotsHtml = [];
     const branchTipShas = new Set(data.branches.map((b) => b.tipSha).filter(Boolean));
     for (const c of data.commits.values()) {
-      const isTip = branchTipShas.has(c.sha);
       const isMerge = (c.parents?.length || 0) >= 2;
-      if (!isTip && !isMerge) continue;
+      const isTip = branchTipShas.has(c.sha);
+      if (!isMerge || isTip) continue; // tips handled separately
       const cat = categoryOf(c.pickBranch);
-      const isHighlight = highlight && (c.sha === highlight || c.refs.has(highlight));
-      const cls = `phy-dot ${cat}${isTip ? ' tip' : ''}${isMerge ? ' merge' : ''}${isHighlight ? ' highlight' : ''}`;
-      const r = isTip ? 6 : 4;
-      const dataAttrs = [
-        `data-sha="${escAttr(c.sha)}"`,
-        isTip ? `data-branch="${escAttr(primaryRef(c, data.branches))}"` : '',
-      ].filter(Boolean).join(' ');
-      dotsHtml.push(`<circle class="${cls}" cx="${c.x}" cy="${c.y}" r="${r}" ${dataAttrs}><title>${escAttr(tooltipFor(c))}</title></circle>`);
+      const cls = `phy-dot ${cat} merge`;
+      dotsHtml.push(`<circle class="${cls}" cx="${c.x}" cy="${c.y}" r="4" data-sha="${escAttr(c.sha)}"><title>${escAttr(tooltipFor(c))}</title></circle>`);
+    }
+
+    // Branch tip dots — one per branch, at its own lane.
+    for (const tip of branchTipPositions) {
+      const cat = categoryOf(tip.branch.name);
+      const isHighlight = highlight === tip.branch.name;
+      const cls = `phy-dot ${cat} tip${isHighlight ? ' highlight' : ''}${tip.absorbed ? ' absorbed' : ''}`;
+      dotsHtml.push(
+        `<circle class="${cls}" cx="${tip.x}" cy="${tip.y}" r="6" data-sha="${escAttr(tip.commit.sha)}" data-branch="${escAttr(tip.branch.name)}"><title>${escAttr(tooltipFor(tip.commit))}</title></circle>`
+      );
     }
     gDots.innerHTML = dotsHtml.join('');
 
-    // Labels: branch-tip names. Auspice-style LOD — if there are many, we
-    // shrink or hide. v1 threshold: always show tip names but size by count.
-    const tips = [...data.commits.values()].filter((c) => branchTipShas.has(c.sha));
-    const fontSize = tips.length <= 6 ? 13 : tips.length <= 15 ? 11 : tips.length <= 30 ? 10 : 0;
+    // Labels: one per branch, at that branch's lane. LOD threshold on tip
+    // count — Auspice-style.
+    const tipCount = branchTipPositions.length;
+    const fontSize = tipCount <= 6 ? 13 : tipCount <= 15 ? 11 : tipCount <= 30 ? 10 : 0;
     const labelsHtml = [];
     if (fontSize > 0) {
-      for (const c of tips) {
-        const branch = data.branches.find((b) => b.tipSha === c.sha);
-        if (!branch) continue;
+      for (const tip of branchTipPositions) {
+        const branch = tip.branch;
         const display = branch.isMain ? branch.name : branch.name.replace(/^(feature|auto)\//, '');
         const cat = categoryOf(branch.name);
         const isHighlight = highlight === branch.name;
-        const cls = `phy-tip-label ${cat}${isHighlight ? ' highlight' : ''}`;
+        const cls = `phy-tip-label ${cat}${isHighlight ? ' highlight' : ''}${tip.absorbed ? ' absorbed' : ''}`;
         labelsHtml.push(
-          `<text class="${cls}" x="${c.x + 10}" y="${c.y}" dy="0.35em" font-size="${fontSize}" data-branch="${escAttr(branch.name)}">${escText(display)}</text>`
+          `<text class="${cls}" x="${tip.x + 10}" y="${tip.y}" dy="0.35em" font-size="${fontSize}" data-branch="${escAttr(branch.name)}">${escText(display)}${tip.absorbed ? ' ✓' : ''}</text>`
         );
       }
     }

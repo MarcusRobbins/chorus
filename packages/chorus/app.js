@@ -305,12 +305,19 @@ const CSS_TEXT = `
 
   .phy-merge { fill: none; stroke: #888; stroke-width: 1.5; stroke-dasharray: 3,3; opacity: 0.7; }
 
+  /* Pointer: dashed connector showing where an "absorbed" branch points */
+  .phy-pointer { fill: none; stroke-width: 1.5; stroke-dasharray: 2,3; opacity: 0.5; }
+  .phy-pointer.feature { stroke: #0366d6; }
+  .phy-pointer.auto { stroke: #e8a030; }
+  .phy-pointer.misc { stroke: #888; }
+
   .phy-dot { cursor: pointer; stroke: #fff; stroke-width: 2; transition: r 0.1s ease; }
   .phy-dot.main { fill: #111; }
   .phy-dot.feature { fill: #0366d6; }
   .phy-dot.auto { fill: #e8a030; }
   .phy-dot.misc { fill: #888; }
   .phy-dot.merge { stroke-dasharray: 2,2; }
+  .phy-dot.absorbed { opacity: 0.55; }
   .phy-dot:hover { r: 8; }
   .phy-dot.highlight { stroke: #000; stroke-width: 3; filter: drop-shadow(0 0 6px rgba(3,102,214,0.5)); }
 
@@ -320,6 +327,7 @@ const CSS_TEXT = `
   .phy-tip-label.auto { fill: #a86a10; }
   .phy-tip-label.misc { fill: #666; }
   .phy-tip-label.highlight { font-weight: 700; text-decoration: underline; }
+  .phy-tip-label.absorbed { opacity: 0.6; font-style: italic; }
   .phy-tip-label:hover { fill: #000; text-decoration: underline; }
 
   /* Header view-mode toggle */
