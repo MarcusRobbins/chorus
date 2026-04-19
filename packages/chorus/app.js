@@ -56,10 +56,17 @@ const CSS_TEXT = `
     display: flex; flex-direction: column;
     pointer-events: auto;
     overflow: hidden;
-    transition: width .2s ease, max-height .2s ease;
+    transition: top .2s ease, bottom .2s ease, width .2s ease, max-height .2s ease;
   }
-  /* (tree-mode wide panel removed — the phylogeny now lives in the band
-     under the iframe, so the panel stays its normal width on browse.) */
+  /* When the phylogeny band is visible, the panel becomes a tall right-
+     hand column from the top of the viewport down to just above the
+     phylogeny. Gives the feature/AI screens more vertical room AND lets
+     the phylogeny span the full width of the screen below the iframe. */
+  .panel.with-phylogeny {
+    top: 20px;
+    bottom: calc(34vh - 40px); /* matches phylogeny-top at calc(24px + 66vh + 24px), minus gap */
+    max-height: none;
+  }
 
   /* Header */
   .header {
@@ -257,7 +264,7 @@ const CSS_TEXT = `
     position: fixed;
     top: calc(24px + 66vh + 24px);
     left: 24px;
-    right: calc(420px + 44px); /* clear of the panel at bottom-right */
+    right: 24px; /* full-width: panel is a tall column above us, not beside */
     bottom: 24px;
     background: rgba(255,255,255,0.94);
     border: 1px solid #e2e2e2;
@@ -1048,7 +1055,10 @@ function boot({ inIframe = false } = {}) {
     if (!state.open) { renderTrigger(); return; }
     panelEl?.remove();
     panelEl = document.createElement('div');
-    panelEl.className = 'panel';
+    // When the phylogeny is visible in the band below the iframe, the
+    // panel becomes a tall right-hand column so the phylogeny can
+    // stretch full-width underneath.
+    panelEl.className = 'panel' + (wantPhyVisible() ? ' with-phylogeny' : '');
 
     const header = renderHeader();
     const body = renderBody();
