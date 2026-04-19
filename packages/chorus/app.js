@@ -1871,6 +1871,7 @@ function boot({ inIframe = false } = {}) {
     if (settingsModalEl) settingsModalEl.remove();
     settingsModalEl = document.createElement('div');
     settingsModalEl.className = 'settings-backdrop';
+    const actionBarHtml = settingsActions();
     settingsModalEl.innerHTML = `
       <div class="settings-modal">
         <div class="header">
@@ -1880,9 +1881,7 @@ function boot({ inIframe = false } = {}) {
         <div class="body">
           ${settingsHtml()}
         </div>
-        <div class="action-bar">
-          ${settingsActions()}
-        </div>
+        ${actionBarHtml ? `<div class="action-bar">${actionBarHtml}</div>` : ''}
       </div>
     `;
     root.appendChild(settingsModalEl);
@@ -1901,7 +1900,11 @@ function boot({ inIframe = false } = {}) {
     // Reuse the wirePanel handlers that map data-actions to settings
     // behaviour, by attaching the same listeners scoped to the modal.
     on('[data-action="sign-in"]', 'click', startDeviceFlow);
-    on('[data-action="sign-out"]', 'click', signOut);
+    on('[data-action="sign-out"]', 'click', () => {
+      signOut();
+      state.settingsModalOpen = false;
+      renderPanel();
+    });
     on('[data-action="clear-key"]', 'click', () => {
       state.openaiKey = null; storeClear('openaiKey'); renderPanel();
     });
@@ -2938,10 +2941,13 @@ function boot({ inIframe = false } = {}) {
     `;
   }
   function settingsActions() {
+    // Signed-in users manage sign-out from the who-strip inline link (or
+    // the burger menu). Only the not-signed-in state has an action bar,
+    // to house the sign-in CTA.
     if (!auth.isAuthed()) {
       return `<div class="secondary"></div><button class="primary" data-action="sign-in">Sign in with GitHub</button>`;
     }
-    return `<div class="secondary"></div><button class="primary" data-action="sign-out">Sign out</button>`;
+    return null;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -3823,6 +3829,7 @@ function boot({ inIframe = false } = {}) {
       <div class="who">
         <img src="${esc(state.user.avatar_url)}" alt="" />
         <span>Signed in as <strong>${esc(state.user.login)}</strong></span>
+        <button class="link-btn" style="margin-left:auto; color:var(--c-text-muted);" data-action="sign-out">Sign out</button>
       </div>
     `;
   }
