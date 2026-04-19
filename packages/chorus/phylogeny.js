@@ -201,29 +201,43 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
         }
       }
     }
-    // Build the rejoin curve: cubic Bezier from lastOwnCommit (on branch
-    // lane) to tipCommit (on main lane). Control points flare horizontally
-    // so the curve has some slack instead of a hard diagonal.
+    // Build the rejoin curve.
+    // Case 1 — branch has own commits still visible (non-FF merges, or
+    // branch's own-lane commits haven't all migrated to main yet):
+    //   cubic Bezier from lastOwnCommit on branch lane → tipCommit on main.
+    // Case 2 — FF-merged or rebased branches, where ALL the branch's
+    //   commits now live on main and therefore pickBranch='main' for them:
+    //   lastOwnCommit is null. Draw a synthetic ARCH that rises from
+    //   main up to branch lane and lands back on main at the tip. The
+    //   arch says 'this branch existed for a moment, clean merge'.
+    //   Width is a small fraction of chart width, clamped.
     let rejoinPath = null;
+    let dotX = tipCommit.x;
+    let dotY = y;
     if (mergedBack && lastOwnCommit) {
       const dx = tipCommit.x - lastOwnCommit.x;
       rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} C ${lastOwnCommit.x + dx * 0.45},${lastOwnCommit.y} ${tipCommit.x - dx * 0.45},${tipCommit.y} ${tipCommit.x},${tipCommit.y}`;
+      dotX = lastOwnCommit.x;
+      dotY = lastOwnCommit.y;
+    } else if (mergedBack) {
+      const archWidth = Math.max(50, Math.min(120, (xScale.range()[1] - xScale.range()[0]) * 0.05));
+      const startX = tipCommit.x - archWidth;
+      // Symmetric cubic: control points pulled straight up to branch lane
+      // so the path rises into the lane and descends back to main.
+      rejoinPath = `M ${startX},${tipCommit.y} C ${startX},${y} ${tipCommit.x},${y} ${tipCommit.x},${tipCommit.y}`;
+      // Put the tip dot at the apex — centre of the arch on the branch lane.
+      dotX = startX + archWidth / 2;
+      dotY = y;
     }
-    // Fallback pointer: dashed vertical from tip position down to the
-    // commit's actual location when we have no own-commits to curve from.
-    const pointerPath = (mergedBack && !lastOwnCommit)
-      ? `M ${tipCommit.x},${y} L ${tipCommit.x},${tipCommit.y}`
-      : null;
     return {
       branch: b,
       commit: tipCommit,
       lastOwnCommit,
-      x: lastOwnCommit ? lastOwnCommit.x : tipCommit.x,
-      y,
+      x: dotX,
+      y: dotY,
       lane,
       mergedBack,
       rejoinPath,
-      pointerPath,
     };
   }).filter(Boolean);
 
@@ -334,9 +348,6 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
     for (const tip of branchTipPositions) {
       if (tip.rejoinPath) {
         stemsHtml.push(`<path class="phy-rejoin ${categoryOf(tip.branch.name)}" d="${tip.rejoinPath}"/>`);
-      } else if (tip.pointerPath) {
-        // Fallback for pure-alias branches with no own commits: dashed stub.
-        stemsHtml.push(`<path class="phy-pointer ${categoryOf(tip.branch.name)}" d="${tip.pointerPath}"/>`);
       }
     }
     gStems.innerHTML = stemsHtml.join('');
