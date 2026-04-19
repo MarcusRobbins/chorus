@@ -1773,6 +1773,9 @@ function boot({ inIframe = false } = {}) {
       turn: 1,
       summary: null,
       branch: null,
+      // Preserved so continueAi can create the branch on a later turn if
+      // the first turn produced text-only output with no write_file calls.
+      plannedSlug: slug,
       workingRef: null,
       previewUrl: null,
       followUpDraft: '',
@@ -1804,7 +1807,7 @@ function boot({ inIframe = false } = {}) {
     }
   }
 
-  function startRefine() {
+  async function startRefine() {
     const branch = state.featureBranch;
     if (!branch) return;
     // Find associated issue (first one we've loaded)
@@ -1818,10 +1821,14 @@ function boot({ inIframe = false } = {}) {
       turn: 0,
       summary: null,
       branch,
+      plannedSlug: branch.replace(/^feature\//, ''),
       workingRef: branch,
-      previewUrl: previewUrlFor(branch), // may be branch URL; refreshed post-commit
+      previewUrl: previewUrlFor(branch),
       followUpDraft: '',
       error: null,
+      // Rebuilt history from issue comments so the AI has context across
+      // sessions (user closes tab Monday, comes back Thursday to refine).
+      priorContext: '',
     };
     if (issue) {
       state.ai.issueHtmlUrl = issue.html_url;
@@ -1831,12 +1838,27 @@ function boot({ inIframe = false } = {}) {
     // raw.githack (10-min edge cache).
     showBranchPreview(branch).then((url) => { if (state.ai) state.ai.previewUrl = url; });
     navigate('ai');
+    // Fetch issue comments asynchronously to build prior-context. The AI
+    // screen renders immediately; when this resolves the next refine turn
+    // will include history automatically.
+    if (issue?.number) {
+      safe(async () => {
+        const comments = await gh.listIssueComments(state.token, OWNER, REPONAME, issue.number);
+        if (!state.ai) return;
+        state.ai.priorContext = buildPriorContext(issue, comments);
+      });
+    }
   }
 
   async function continueAi() {
-    if (!state.ai?.branch) return;
+    if (!state.ai) return;
     const followUp = (state.ai.followUpDraft || '').trim();
     if (!followUp) return;
+    // state.ai.branch may be null if the first turn produced text only (no
+    // write_file calls, so nothing was committed and no branch was created).
+    // In that case, continueAi is effectively still a "first commit" —
+    // commitAndSurface will lazily create the branch from plannedSlug when
+    // it has something to commit.
     if (!state.openaiKey) {
       state.pendingIntent = 'refine';
       navigate('keyPrompt');
@@ -1859,7 +1881,7 @@ function boot({ inIframe = false } = {}) {
       const hasHistory = Array.isArray(state.ai.messages) && state.ai.messages.length > 0;
       const runArgs = hasHistory
         ? { priorMessages: state.ai.messages, followUp: followUpWithCapture }
-        : { userPrompt: buildRefinePrompt(state.ai.branch, followUpWithCapture) };
+        : { userPrompt: buildRefinePrompt(state.ai.branch, followUpWithCapture, state.ai.priorContext || '') };
       const result = await runAiSession({
         apiKey: state.openaiKey, model: state.openaiModel || DEFAULT_MODEL,
         ...runArgs,
@@ -1882,20 +1904,26 @@ function boot({ inIframe = false } = {}) {
     state.ai.messages = result.messages;
     if (!state.ai.staged.size) {
       state.ai.status = 'done';
-      state.ai.summary = result.summary || '(no changes this turn)';
+      state.ai.summary = result.summary || '(no changes this turn — the AI responded with text only. Refine with an explicit instruction and try again.)';
       renderPanel();
       return;
     }
     state.ai.status = 'committing';
     renderPanel();
-    const branch = firstTurn
-      ? `feature/${slugify(state.name) || 'issue-' + (issue?.number || Date.now().toString(36))}`
+    // A "first commit" is any commit where the branch hasn't been created yet —
+    // regardless of whether this is turn 1 or turn N. Earlier text-only turns
+    // leave state.ai.branch null until something actually gets written.
+    const isFirstCommit = !state.ai.branch;
+    const branch = isFirstCommit
+      ? `feature/${state.ai.plannedSlug || slugify(state.name) || 'issue-' + (issue?.number || Date.now().toString(36))}`
       : state.ai.branch;
     const commitMessage = result.summary
       ? `${result.summary}\n\nRefs #${issue?.number ?? ''}`
       : `AI edits (turn ${state.ai.turn})`;
     const commitRes = await gh.commitFiles(state.token, OWNER, REPONAME, {
-      branch, startFrom: firstTurn ? defaultBranch : undefined,
+      branch,
+      // Only create-from-default when the branch doesn't exist yet.
+      startFrom: isFirstCommit ? (defaultBranch || state.ai.workingRef || 'main') : undefined,
       message: commitMessage, files: state.ai.staged,
     });
     // Update our SHA cache to the brand-new commit so subsequent
@@ -1904,12 +1932,22 @@ function boot({ inIframe = false } = {}) {
     const previewPath = state.currentPath || 'index.html';
     const previewUrl = buildPreviewUrl({ branch, sha: commitRes?.sha, path: previewPath });
     if (issue?.number) {
-      await safe(() => gh.createIssueComment(
-        state.token, OWNER, REPONAME, issue.number,
-        firstTurn
-          ? `AI built a candidate on branch \`${branch}\`.\n\nPreview: ${previewUrl}${result.summary ? '\n\nSummary: ' + result.summary : ''}`
-          : `Turn ${state.ai.turn} on \`${branch}\`${result.summary ? ': ' + result.summary : ''}`
-      ));
+      const reasoning = summariseReasoning(state.ai.events);
+      const body = isFirstCommit
+        ? [
+            `AI built a candidate on branch \`${branch}\`.`,
+            '',
+            `Preview: ${previewUrl}`,
+            result.summary ? `\nSummary: ${result.summary}` : '',
+            reasoning ? `\n<details><summary>What the AI did (turn ${state.ai.turn})</summary>\n\n${reasoning}\n</details>` : '',
+          ].filter(Boolean).join('\n')
+        : [
+            `Turn ${state.ai.turn} on \`${branch}\`${result.summary ? ': ' + result.summary : ''}`,
+            '',
+            `Preview: ${previewUrl}`,
+            reasoning ? `\n<details><summary>What the AI did</summary>\n\n${reasoning}\n</details>` : '',
+          ].filter(Boolean).join('\n');
+      await safe(() => gh.createIssueComment(state.token, OWNER, REPONAME, issue.number, body));
     }
     state.ai.branch = branch;
     state.ai.workingRef = branch;
@@ -1922,6 +1960,61 @@ function boot({ inIframe = false } = {}) {
     // with a fresh URL so the iframe actually navigates.
     showPreviewFrame(previewUrl);
     renderPanel();
+  }
+
+  // Build a condensed context summary from the original issue + all AI
+  // comments on it. The AI reads this as part of the refine prompt so it
+  // has memory across browser sessions without us persisting client state.
+  function buildPriorContext(issue, comments) {
+    const lines = [];
+    if (issue?.title) lines.push(`Original ticket: ${issue.title}`);
+    if (issue?.body) {
+      const bodyTrimmed = issue.body.replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);
+      if (bodyTrimmed) lines.push(`Ticket description: ${bodyTrimmed}`);
+    }
+    const aiComments = (comments || []).filter((c) =>
+      // Pick out the comments we posted from commitAndSurface. They start
+      // with either "AI built a candidate" or "Turn N on".
+      /^AI built a candidate|^Turn \d+ on/.test(c.body || '')
+    );
+    if (aiComments.length) {
+      lines.push('');
+      lines.push(`Prior AI turns on this branch (${aiComments.length}):`);
+      for (const c of aiComments) {
+        // Strip the <details> block to keep context compact; the summary is
+        // enough for the AI to orient. Full details are still in the issue
+        // for humans.
+        const condensed = (c.body || '').replace(/<details>[\s\S]*?<\/details>/g, '').trim();
+        lines.push(`- ${condensed.slice(0, 400)}`);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  // Render an AI session's event log into compact markdown for GitHub issue
+  // comments. Captures the reasoning trail (thinking, tool calls, assistant
+  // text, finish) so reviewers can see what the AI actually did without
+  // having to rerun the session. Kept short — we want a record, not a novel.
+  function summariseReasoning(events) {
+    if (!events?.length) return '';
+    const lines = [];
+    for (const e of events) {
+      if (e.type === 'tool_call') {
+        const argPreview = shortArgs(e.args).slice(0, 120);
+        lines.push(`- \`${e.name}(${argPreview})\``);
+      } else if (e.type === 'tool_error') {
+        lines.push(`  - _error:_ ${String(e.error).slice(0, 160)}`);
+      } else if (e.type === 'assistant_text' && e.text) {
+        lines.push(`- _AI:_ "${e.text.replace(/\n+/g, ' ').slice(0, 200)}${e.text.length > 200 ? '…' : ''}"`);
+      } else if (e.type === 'finish') {
+        lines.push(`- ✓ finish — ${e.summary}`);
+      } else if (e.type === 'stopped_without_finish') {
+        lines.push(`- ⚠ stopped without calling finish`);
+      } else if (e.type === 'iteration_limit') {
+        lines.push(`- ⚠ hit iteration limit`);
+      }
+    }
+    return lines.join('\n');
   }
 
   function aiFail(msg) {
@@ -1980,16 +2073,17 @@ function boot({ inIframe = false } = {}) {
     ].join('\n');
   }
 
-  function buildRefinePrompt(branch, followUp) {
+  function buildRefinePrompt(branch, followUp, priorContext = '') {
     return [
       `You are continuing work on an existing feature branch: \`${branch}\`.`,
       '',
       `Use list_files and read_file (they default to the ${branch} branch) to see the current state.`,
       `Then apply the requested change by staging edits with write_file, and call finish when done.`,
       '',
+      priorContext ? `Context from prior turns on this branch (for reference, don't re-do this work):\n${priorContext}\n` : '',
       `User's request:`,
       followUp,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   async function executeTool(name, args) {
