@@ -217,8 +217,23 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
   // If the whole history fits in an instant, fake a minute span so the
   // axis has some extent.
   const tExtent = tMax - tMin > 0 ? [tMin, tMax] : [tMin - 60e3, tMin + 60e3];
+  // xPadRight is the reserved space on the right side of the chart for
+  // branch-tip labels plus main's own label with a breathing gap. Size
+  // it from the longest label name we'll actually draw (stripping the
+  // feature/auto/ prefixes that our rendering strips), so a repo with
+  // long branch names gets more room.
+  const LABEL_EST_PX_PER_CHAR = 7;
+  const LABEL_OFFSET_PX = 10;
+  const MAIN_LABEL_GAP_PX = 36;
+  let longestLabelChars = (mainName || 'main').length;
+  for (const b of branches) {
+    if (b.isMain) continue;
+    const display = b.name.replace(/^(feature|auto)\//, '');
+    if (display.length > longestLabelChars) longestLabelChars = display.length;
+  }
+  const estMaxLabelPx = longestLabelChars * LABEL_EST_PX_PER_CHAR + LABEL_OFFSET_PX;
   const xPadLeft = 20;
-  const xPadRight = 180; // branch tip labels
+  const xPadRight = estMaxLabelPx + MAIN_LABEL_GAP_PX + 60;
   const xScale = scaleTime()
     .domain(tExtent)
     .range([xPadLeft, width - xPadRight]);
@@ -288,18 +303,25 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     }
   }
 
-  // Pass 3: main tip must be the rightmost thing in the diagram. Any
-  // commit that got nudged past main's tip x shifts main's tip forward
-  // so the label + dot always sit at the right edge.
+  // Pass 3: main tip must be the rightmost thing in the diagram, with
+  // enough breathing room that no OTHER branch's label (which extends
+  // to the right of its tip dot) runs into main's own label. Compute
+  // the right-edge of the furthest non-main label, then place main
+  // clearly past it with a fixed gap.
   const mainTipSha = mainBranch?.tipSha;
   const mainTip = mainTipSha ? commits.get(mainTipSha) : null;
   if (mainTip) {
-    let maxX = mainTip.x;
-    for (const c of commits.values()) {
-      if (c.sha !== mainTip.sha && c.x > maxX) maxX = c.x;
+    let maxLabelRight = mainTip.x;
+    for (const b of branches) {
+      if (b.isMain || !b.tipSha) continue;
+      const tipC = commits.get(b.tipSha);
+      if (!tipC) continue;
+      const display = b.name.replace(/^(feature|auto)\//, '');
+      const labelRight = tipC.x + LABEL_OFFSET_PX + display.length * LABEL_EST_PX_PER_CHAR;
+      if (labelRight > maxLabelRight) maxLabelRight = labelRight;
     }
-    if (maxX > mainTip.x) {
-      mainTip.x = maxX + MIN_COMMIT_DX;
+    if (maxLabelRight + MAIN_LABEL_GAP_PX > mainTip.x) {
+      mainTip.x = maxLabelRight + MAIN_LABEL_GAP_PX;
     }
   }
 
