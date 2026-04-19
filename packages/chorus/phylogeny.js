@@ -427,10 +427,14 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
         // Same lane: straight horizontal.
         c.branchPath = `M ${p1.x},${p1.y} L ${c.x},${c.y}`;
       } else {
-        // Lane change: elbow at child.x (so the vertical jog happens AT the
-        // new commit — this is the Auspice-style 'branch point at the
-        // destination' shape). Reads as 'here's where we left main'.
-        c.branchPath = `M ${p1.x},${p1.y} L ${c.x},${p1.y} L ${c.x},${c.y}`;
+        // Lane change (branch diverging from its parent's lane). Elbow
+        // at PARENT.x: go vertical immediately from parent, then run
+        // horizontally on the branch's own lane to the child. This
+        // keeps the stem entirely on the BRANCH's colour — the previous
+        // shape (corner at child.x) put a horizontal segment along the
+        // PARENT's lane drawn in the child's branch colour, producing
+        // visible blue/orange segments on main's trunk.
+        c.branchPath = `M ${p1.x},${p1.y} L ${p1.x},${c.y} L ${c.x},${c.y}`;
       }
     }
     for (const sSha of secondaryShas) {
