@@ -99,6 +99,12 @@ export const createIssueComment = (token, owner, repo, number, body) =>
 export const listTree = (token, owner, repo, ref) =>
   gh(token, `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
 
+// Compare two refs. Returns { merge_base_commit, commits: [...] }.
+// Used by the phylogeny viewer to find where a feature branch diverged from
+// main and what commits happened on it.
+export const compareCommits = (token, owner, repo, base, head) =>
+  gh(token, `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=100`);
+
 // Read a file at a ref. Returns decoded utf-8 string. Null if file doesn't exist.
 export async function readFile(token, owner, repo, path, ref) {
   const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';

@@ -17,6 +17,7 @@ import * as gh from '../widget/gh-client.js';
 import { runSession as runAiSession } from '../widget/ai-client.js';
 import * as preview from '../shared/preview.js';
 import * as auth from '../shared/auth.js';
+import { createPhylogeny, loadPhylogenyData } from './phylogeny.js';
 
 // ───────────────────────────────────────────────────────────────────
 // Styles — defined up front so the boot path can use them without TDZ
@@ -57,11 +58,8 @@ const CSS_TEXT = `
     overflow: hidden;
     transition: width .2s ease, max-height .2s ease;
   }
-  /* In tree mode we get a wider panel because the iframe has shrunk to
-     windowed (top-left) and there's room on the right. */
-  .panel.tree-mode {
-    width: 560px; max-height: 88vh;
-  }
+  /* (tree-mode wide panel removed — the phylogeny now lives in the band
+     under the iframe, so the panel stays its normal width on browse.) */
 
   /* Header */
   .header {
@@ -168,7 +166,18 @@ const CSS_TEXT = `
   .branch .marker.auto { background: #fff4e6; color: #a60; }
   .section-heading { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin: 6px 0 2px; }
 
-  /* Phylogeny tree */
+  /* In-panel tree-view intro card (phylogeny itself is in the band) */
+  .tree-hint {
+    padding: 12px;
+    background: #f8fbff;
+    border: 1px solid #d0e4ff;
+    border-radius: 8px;
+  }
+  .tree-hint-title { font-weight: 600; color: #0366d6; font-size: 13px; margin-bottom: 4px; }
+
+  /* Phylogeny tree (legacy in-panel version; unused in tree mode now
+     that the phylogeny lives in the band, but kept for reference if we
+     want to re-introduce a mini-map inside the panel later.) */
   .tree {
     position: relative;
     padding: 8px 4px 8px 32px;
@@ -242,6 +251,76 @@ const CSS_TEXT = `
     position: absolute; left: -14px; top: 50%;
     width: 14px; height: 2px; background: #cfe2ff;
   }
+
+  /* Phylogeny — floating horizontal band under the iframe */
+  .phylogeny-host {
+    position: fixed;
+    top: calc(24px + 66vh + 24px);
+    left: 24px;
+    right: calc(420px + 44px); /* clear of the panel at bottom-right */
+    bottom: 24px;
+    background: rgba(255,255,255,0.94);
+    border: 1px solid #e2e2e2;
+    border-radius: 10px;
+    box-shadow: 0 20px 48px rgba(0,0,0,0.1);
+    pointer-events: auto;
+    overflow: hidden;
+    display: none;
+    min-height: 140px;
+    backdrop-filter: blur(4px);
+  }
+  .phylogeny-host.active { display: block; }
+  .phylogeny-header {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 8px 14px; display: flex; align-items: center; gap: 10px;
+    font-size: 11px; color: #666; font-family: system-ui, sans-serif;
+    border-bottom: 1px solid #eee; background: #fafafa;
+    z-index: 2;
+  }
+  .phylogeny-header .title { font-weight: 600; color: #333; }
+  .phylogeny-header .count { color: #888; }
+  .phylogeny-header .loading { color: #0366d6; font-style: italic; margin-left: auto; }
+  .phylogeny-body {
+    position: absolute; top: 32px; left: 0; right: 0; bottom: 0;
+  }
+  .phy-tooltip {
+    position: absolute;
+    padding: 6px 10px;
+    background: #111; color: #fff;
+    font-size: 11px; line-height: 1.4;
+    border-radius: 4px;
+    pointer-events: none;
+    white-space: pre-wrap;
+    max-width: 280px;
+    z-index: 10;
+    font-family: system-ui, sans-serif;
+  }
+  .phylogeny-svg text { pointer-events: auto; cursor: pointer; user-select: none; font-family: system-ui, sans-serif; }
+
+  .phy-stem { fill: none; stroke: #bbb; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .phy-stem.main { stroke: #111; stroke-width: 3; }
+  .phy-stem.feature { stroke: #0366d6; }
+  .phy-stem.auto { stroke: #e8a030; }
+  .phy-stem.misc { stroke: #888; }
+
+  .phy-merge { fill: none; stroke: #888; stroke-width: 1.5; stroke-dasharray: 3,3; opacity: 0.7; }
+
+  .phy-dot { cursor: pointer; stroke: #fff; stroke-width: 2; transition: r 0.1s ease; }
+  .phy-dot.main { fill: #111; }
+  .phy-dot.feature { fill: #0366d6; }
+  .phy-dot.auto { fill: #e8a030; }
+  .phy-dot.misc { fill: #888; }
+  .phy-dot.merge { stroke-dasharray: 2,2; }
+  .phy-dot:hover { r: 8; }
+  .phy-dot.highlight { stroke: #000; stroke-width: 3; filter: drop-shadow(0 0 6px rgba(3,102,214,0.5)); }
+
+  .phy-tip-label { fill: #333; font-weight: 500; }
+  .phy-tip-label.main { fill: #111; font-weight: 600; }
+  .phy-tip-label.feature { fill: #0366d6; }
+  .phy-tip-label.auto { fill: #a86a10; }
+  .phy-tip-label.misc { fill: #666; }
+  .phy-tip-label.highlight { font-weight: 700; text-decoration: underline; }
+  .phy-tip-label:hover { fill: #000; text-decoration: underline; }
 
   /* Header view-mode toggle */
   .header .view-toggle {
@@ -680,6 +759,85 @@ function boot({ inIframe = false } = {}) {
   styleEl.textContent = CSS_TEXT;
   root.appendChild(styleEl);
 
+  // ── Phylogeny host (horizontal band under the iframe) ─────────
+  const phyHost = document.createElement('div');
+  phyHost.className = 'phylogeny-host';
+  const phyHeader = document.createElement('div');
+  phyHeader.className = 'phylogeny-header';
+  phyHost.appendChild(phyHeader);
+  const phyBody = document.createElement('div');
+  phyBody.className = 'phylogeny-body';
+  phyHost.appendChild(phyBody);
+  root.appendChild(phyHost);
+
+  let phylogeny = null; // lazily created on first show
+  let phyData = null;   // { commits, branches, mainName }
+  let phyLoading = false;
+  let phyLoadedForBranchSet = ''; // key of branch names to detect staleness
+
+  function updatePhyHeader(status) {
+    const counts = phyData ? `${phyData.branches.length} branches · ${phyData.commits.size} commits` : '';
+    phyHeader.innerHTML = `
+      <span class="title">Phylogeny</span>
+      <span class="count">${esc(counts)}</span>
+      ${status ? `<span class="loading">${esc(status)}</span>` : ''}
+    `;
+  }
+
+  function wantPhyVisible() {
+    return state.open && state.viewMode === 'tree' && configOK();
+  }
+
+  async function refreshPhylogeny() {
+    if (!state.branches?.length) return;
+    const key = state.branches.map((b) => `${b.name}@${b.commit?.sha?.slice(0,7)}`).sort().join(',');
+    if (phyLoadedForBranchSet === key && phyData) {
+      renderPhylogeny();
+      return;
+    }
+    phyLoading = true;
+    updatePhyHeader('loading commit history…');
+    try {
+      phyData = await loadPhylogenyData({
+        token: state.token, owner: OWNER, repo: REPONAME,
+        branches: state.branches, gh,
+      });
+      phyLoadedForBranchSet = key;
+    } catch (err) {
+      if (DEBUG) console.log('[chorus] phylogeny load failed', err);
+    } finally {
+      phyLoading = false;
+      renderPhylogeny();
+    }
+  }
+
+  function renderPhylogeny() {
+    const visible = wantPhyVisible();
+    phyHost.classList.toggle('active', visible);
+    if (!visible) return;
+    if (!phyData) {
+      updatePhyHeader(phyLoading ? 'loading commit history…' : 'no data yet');
+      return;
+    }
+    if (!phylogeny) {
+      phylogeny = createPhylogeny(phyBody, {
+        onSelectBranch: (branchName) => {
+          // Reuse the existing branch-selection flow.
+          selectBranch(branchName);
+        },
+      });
+    }
+    updatePhyHeader('');
+    phylogeny.render(phyData, state.currentBranch || state.featureBranch);
+  }
+
+  // Re-layout on window resize.
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => phylogeny?.resize(), 150);
+  });
+
   // When this chorus is acting as a meta-editor (auto-preview enabled on the
   // top-level page), preview iframes open in a "windowed" mode — a bordered,
   // smaller-than-viewport frame — so the inner chorus inside it lives at its
@@ -796,6 +954,9 @@ function boot({ inIframe = false } = {}) {
     if (DEBUG) console.log('[chorus] openPanel → setWindowed', wantWindowed(), { IS_META, hasIframe: preview.isShowing() });
     preview.setWindowed(wantWindowed());
     renderPanel();
+    // Kick off phylogeny data load on first open. Safe to call repeatedly —
+    // it no-ops if the branch-set hasn't changed.
+    refreshPhylogeny();
   }
   function closePanel() {
     state.open = false;
@@ -806,6 +967,7 @@ function boot({ inIframe = false } = {}) {
     if (DEBUG) console.log('[chorus] closePanel → setWindowed', wantWindowed(), { IS_META, hasIframe: preview.isShowing() });
     preview.setWindowed(wantWindowed());
     renderTrigger();
+    renderPhylogeny(); // will hide it (wantPhyVisible() is false when closed)
   }
 
   // ── Navigation ────────────────────────────────────────────────
@@ -854,11 +1016,7 @@ function boot({ inIframe = false } = {}) {
     if (!state.open) { renderTrigger(); return; }
     panelEl?.remove();
     panelEl = document.createElement('div');
-    // Panel widens when we're in tree mode on the browse screen (the only
-    // place the tree actually renders). Keeps the footprint minimal on
-    // propose/feature/ai screens where the existing layout is tight.
-    const useWide = state.viewMode === 'tree' && state.screen === 'browse';
-    panelEl.className = 'panel' + (useWide ? ' tree-mode' : '');
+    panelEl.className = 'panel';
 
     const header = renderHeader();
     const body = renderBody();
@@ -986,51 +1144,17 @@ function boot({ inIframe = false } = {}) {
     `;
   }
 
-  // Phylogeny view — main as the trunk, branches fanning off.
-  // v1: flat (all feature + auto branches hang directly off main). Later
-  // iterations can show branch-from-branch nesting and merge arcs.
+  // In tree view the actual phylogeny lives in the horizontal band under
+  // the iframe — the panel becomes a lightweight 'you are here' card with
+  // auth status + quick actions. Click a tip on the phylogeny to navigate.
   function browseTreeHtml() {
-    const main = state.branches.find((b) => b.name === 'main' || b.name === 'master');
-    const features = state.branches.filter((b) => b.name.startsWith('feature/'));
-    const autos = state.branches.filter((b) => b.name.startsWith('auto/') && b !== main);
-    const misc = state.branches.filter((b) => b !== main && !b.name.startsWith('feature/') && !b.name.startsWith('auto/'));
-    const hasChildren = features.length + autos.length + misc.length > 0;
     return `
       ${whoHtml()}
       ${state.branchesError ? `<div class="err">${esc(state.branchesError)}</div>` : ''}
       ${state.branchesLoading && !state.branches.length ? `<div class="muted-s">Loading branches…</div>` : ''}
-      <div class="tree">
-        ${hasChildren ? `<div class="tree-trunk"></div>` : ''}
-        ${main ? treeNode(main, 'root') : ''}
-        ${features.map((b) => treeNode(b, 'feature')).join('')}
-        ${autos.map((b) => treeNode(b, 'auto')).join('')}
-        ${misc.map((b) => treeNode(b, 'misc')).join('')}
-        <button class="tree-sprout" data-action="goto-propose">
-          <span class="connector"></span>
-          ✚ Sprout a new feature from <code>main</code>
-        </button>
-      </div>
-    `;
-  }
-
-  function treeNode(b, kind) {
-    const isCurrent = state.currentBranch === b.name;
-    const isRoot = kind === 'root';
-    const cls = ['tree-node', kind];
-    if (isCurrent) cls.push('active');
-    const displayName = isRoot
-      ? b.name
-      : b.name.replace(/^(feature|auto)\//, '');
-    const action = isRoot ? '' : ` data-action="select-branch" data-branch="${esc(b.name)}"`;
-    return `
-      <div class="${cls.join(' ')}"${action}>
-        ${isRoot ? '' : '<span class="connector"></span>'}
-        <span class="dot"></span>
-        <span class="label">
-          <span class="name">${esc(displayName)}</span>
-          ${isRoot ? '<span class="meta">trunk</span>' : ''}
-        </span>
-        <span class="sha">${esc((b.commit?.sha || '').slice(0, 7))}</span>
+      <div class="tree-hint">
+        <div class="tree-hint-title">🌿 Phylogeny below</div>
+        <p class="muted-s">Click a branch on the tree to explore it, or sprout a new one.</p>
       </div>
     `;
   }
@@ -1086,6 +1210,9 @@ function boot({ inIframe = false } = {}) {
     } finally {
       state.branchesLoading = false;
       if (state.screen === 'browse') renderPanel();
+      // If the phylogeny is visible, load its deeper data now that we
+      // know the branch set. No-ops if the panel isn't open.
+      refreshPhylogeny();
     }
   }
 
@@ -1541,17 +1668,18 @@ function boot({ inIframe = false } = {}) {
       state.viewMode = state.viewMode === 'tree' ? 'list' : 'tree';
       storeSave('viewMode', state.viewMode);
       renderPanel();
+      renderPhylogeny(); // toggle band visibility
     });
 
     // Browse (list view)
     panelEl.querySelectorAll('.branch').forEach((el) => {
       el.addEventListener('click', () => selectBranch(el.dataset.branch));
     });
-    // Browse (tree view) — same navigation, different selector
-    panelEl.querySelectorAll('[data-action="select-branch"]').forEach((el) => {
-      el.addEventListener('click', () => selectBranch(el.dataset.branch));
+    on('[data-action="refresh-branches"]', 'click', () => {
+      fetchBranches();
+      phyLoadedForBranchSet = ''; // force phylogeny reload
+      refreshPhylogeny();
     });
-    on('[data-action="refresh-branches"]', 'click', fetchBranches);
     on('[data-action="goto-propose"]', 'click', () => {
       if (!requireAuth('propose')) return;
       navigate('propose');
