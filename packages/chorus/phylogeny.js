@@ -239,6 +239,56 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     c.y = yScale(c.lane);
   }
 
+  // Per-lane min-spacing. Commits whose timestamps are close together
+  // would otherwise produce elbow corners stacked on top of each other —
+  // making independent branches look like they're related (e.g. test5
+  // appearing to branch off menu just because its divergence timestamp
+  // is near menu's merge timestamp). Walk each lane left-to-right and
+  // nudge commits forward so no two are within MIN_COMMIT_DX of each
+  // other on the same lane. This distorts the time scale slightly for
+  // clustered regions but keeps topology legible.
+  //
+  // Elbow corners (divergence + rejoin) inherit the nudged x values
+  // automatically because they're derived from commit.x at render time.
+  const MIN_COMMIT_DX = 28;
+  const byLane = new Map();
+  for (const c of commits.values()) {
+    if (!byLane.has(c.lane)) byLane.set(c.lane, []);
+    byLane.get(c.lane).push(c);
+  }
+  for (const laneCommits of byLane.values()) {
+    laneCommits.sort((a, b) => a.x - b.x);
+    for (let i = 1; i < laneCommits.length; i++) {
+      const prev = laneCommits[i - 1];
+      const curr = laneCommits[i];
+      if (curr.x - prev.x < MIN_COMMIT_DX) {
+        curr.x = prev.x + MIN_COMMIT_DX;
+      }
+    }
+  }
+
+  // Second pass: divergence points across lanes. A "divergence point" is
+  // a commit whose primary parent lives on a different lane — its elbow
+  // corner drops vertically through main's lane at that x. Two branches
+  // diverging at similar timestamps end up with verticals stacked on top
+  // of each other, making one look like it branched off the other. Nudge
+  // divergence commits apart globally so their elbow verticals don't
+  // collide.
+  const MIN_DIVERGENCE_DX = 40;
+  const divergencePoints = [];
+  for (const c of commits.values()) {
+    const p1 = c.parents[0] && commits.get(c.parents[0]);
+    if (p1 && p1.lane !== c.lane) divergencePoints.push(c);
+  }
+  divergencePoints.sort((a, b) => a.x - b.x);
+  for (let i = 1; i < divergencePoints.length; i++) {
+    const prev = divergencePoints[i - 1];
+    const curr = divergencePoints[i];
+    if (curr.x - prev.x < MIN_DIVERGENCE_DX) {
+      curr.x = prev.x + MIN_DIVERGENCE_DX;
+    }
+  }
+
   // Branch tip positions + rejoin paths.
   // A branch is "merged back" if main's trunk contains a merge commit
   // whose second-parent subtree reaches this branch's tip. The rejoin is
