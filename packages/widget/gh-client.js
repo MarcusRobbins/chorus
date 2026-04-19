@@ -105,6 +105,15 @@ export const listTree = (token, owner, repo, ref) =>
 export const compareCommits = (token, owner, repo, base, head) =>
   gh(token, `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=100`);
 
+// List commits on a ref. Returns the most recent first. Each element has
+// .sha, .parents[].sha, .commit.author.date, .commit.message, etc.
+export const listCommits = (token, owner, repo, { sha, perPage = 100 } = {}) => {
+  const qs = new URLSearchParams();
+  if (sha) qs.set('sha', sha);
+  qs.set('per_page', String(perPage));
+  return gh(token, `/repos/${owner}/${repo}/commits?${qs.toString()}`);
+};
+
 // Read a file at a ref. Returns decoded utf-8 string. Null if file doesn't exist.
 export async function readFile(token, owner, repo, path, ref) {
   const q = ref ? `?ref=${encodeURIComponent(ref)}` : '';

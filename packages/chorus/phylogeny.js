@@ -54,13 +54,26 @@ export async function loadPhylogenyData({ token, owner, repo, branches, gh }) {
     });
   };
 
+  // Fetch main's own history first. Without this, main's tip commit has no
+  // parent in our graph — so no stem connects it to the merge-base points
+  // on main, and main appears as a lone dot floating on the right.
+  // 100 commits is usually plenty; we can paginate later if needed.
+  const tasks = [];
+  tasks.push((async () => {
+    try {
+      const mainCommits = await gh.listCommits(token, owner, repo, { sha: mainName, perPage: 100 });
+      for (const c of mainCommits || []) addCommit(c, mainName);
+    } catch (err) {
+      console.warn('[phylogeny] listCommits(main) failed', err?.message || err);
+    }
+  })());
+
   // For each non-main branch, fetch the compare payload. That gives us the
   // merge base (divergence point on main) plus every commit on the branch
   // since divergence. We also pick up the merge base commit itself so the
   // elbow has somewhere to attach.
-  const tasks = branches
-    .filter((b) => b.name !== mainName)
-    .map(async (b) => {
+  for (const b of branches.filter((b) => b.name !== mainName)) {
+    tasks.push((async () => {
       try {
         const cmp = await gh.compareCommits(token, owner, repo, mainName, b.name);
         if (cmp.merge_base_commit) addCommit(cmp.merge_base_commit, mainName);
@@ -69,11 +82,12 @@ export async function loadPhylogenyData({ token, owner, repo, branches, gh }) {
         // Rate-limit / 404 — skip this branch's history, keep its tip visible.
         console.warn('[phylogeny] compare failed for', b.name, err?.message || err);
       }
-    });
+    })());
+  }
   await Promise.allSettled(tasks);
 
-  // Always include the main tip even if we didn't pick it up via compares
-  // (e.g. no feature branches exist yet).
+  // If main's tip still isn't in the map (empty history, API error) stub it
+  // so it doesn't vanish entirely.
   if (mainTipSha && !commits.has(mainTipSha)) {
     commits.set(mainTipSha, {
       sha: mainTipSha,
