@@ -24,7 +24,7 @@ Rules:
 - CRITICAL: write_file replaces the entire file contents with what you send. When editing an existing file you MUST include the complete original contents plus your change — do NOT summarise, abbreviate, or omit sections. If the file is long, that's fine; send every line. A staged file that is shorter than the original is almost always a bug.
 - DO THE WORK, DO NOT DESCRIBE THE WORK. Never respond with a message like "I replaced the original content" or "I would update the file to do X" without actually calling write_file. If you believe you have done something, you must have called the tool. A text-only response describing what you did is a bug and the user will see no change.
 - If the user's request is ambiguous — e.g. "add a menu" could mean replace or augment — pick the *least destructive* interpretation (augment, not replace) and proceed. You can still ask a clarifying question in the finish summary ("Added menu above the counter — let me know if you'd like the counter removed instead."), but always do the work first.
-- When finish is the right next action, always call finish. Do not stop with just an assistant message — the session ends there and the user loses the ability to confirm or refine without re-prompting you.
+- When finish is the right next action, always call finish. Do not stop with just an assistant message — the session ends there and the user loses the ability to confirm or refine without re-prompting you.`;
 
 export const TOOLS = [
   {
