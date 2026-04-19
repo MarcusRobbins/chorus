@@ -1878,7 +1878,6 @@ function boot({ inIframe = false } = {}) {
           <button class="close" data-action="close-settings" title="Close">✕</button>
         </div>
         <div class="body">
-          ${whoHtml()}
           ${settingsHtml()}
         </div>
         <div class="action-bar">
@@ -3824,7 +3823,6 @@ function boot({ inIframe = false } = {}) {
       <div class="who">
         <img src="${esc(state.user.avatar_url)}" alt="" />
         <span>Signed in as <strong>${esc(state.user.login)}</strong></span>
-        <button class="link-btn" style="margin-left:auto;" data-action="goto-settings">Settings</button>
       </div>
     `;
   }
