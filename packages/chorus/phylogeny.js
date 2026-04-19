@@ -448,22 +448,30 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
   // Secondary parents get a cubic Bezier into the merge commit.
   for (const c of commits.values()) {
     c.branchPath = '';
+    c.trunkExtensionPath = ''; // parent-lane horizontal, drawn in parent's colour
     c.mergeEdges = [];
     const [primaryParentSha, ...secondaryShas] = c.parents;
     const p1 = primaryParentSha ? commits.get(primaryParentSha) : null;
     if (p1) {
       if (Math.abs(p1.y - c.y) < 0.5) {
-        // Same lane: straight horizontal.
+        // Same lane: straight horizontal, coloured by c.pickBranch.
         c.branchPath = `M ${p1.x},${p1.y} L ${c.x},${c.y}`;
       } else {
-        // Lane change (branch diverging from its parent's lane). Elbow
-        // at PARENT.x: go vertical immediately from parent, then run
-        // horizontally on the branch's own lane to the child. This
-        // keeps the stem entirely on the BRANCH's colour — the previous
-        // shape (corner at child.x) put a horizontal segment along the
-        // PARENT's lane drawn in the child's branch colour, producing
-        // visible blue/orange segments on main's trunk.
-        c.branchPath = `M ${p1.x},${p1.y} L ${p1.x},${c.y} L ${c.x},${c.y}`;
+        // Lane change (branch diverging). Elbow corner at CHILD'S X —
+        // the divergence happens at the timestamp when the branch
+        // actually started doing work, not at the parent commit's
+        // position. Many branches sharing a parent commit will then
+        // diverge at DIFFERENT x's (their respective first-commit
+        // timestamps) rather than all stacking on one vertical.
+        //
+        // Split the stem into two paths so the horizontal along the
+        // PARENT'S lane is coloured by the parent's branch, and the
+        // vertical + rest is coloured by the child's branch.
+        c.trunkExtensionPath = `M ${p1.x},${p1.y} L ${c.x},${p1.y}`;
+        c.branchPath = `M ${c.x},${p1.y} L ${c.x},${c.y}`;
+        // Stash the parent's pickBranch so the renderer knows what
+        // colour to paint the trunk-extension in.
+        c.trunkExtensionBranch = p1.pickBranch || mainName;
       }
     }
     for (const sSha of secondaryShas) {
@@ -538,6 +546,14 @@ export function createPhylogeny(container, { onSelectBranch } = {}) {
     // Stems.
     const stemsHtml = [];
     for (const c of data.commits.values()) {
+      // Trunk-extension horizontal (on parent's lane) is drawn in the
+      // parent's branch colour — so divergence elbows don't paint
+      // branch colour along main's trunk.
+      if (c.trunkExtensionPath) {
+        const parentBranch = c.trunkExtensionBranch || 'main';
+        const parentCls = 'phy-stem' + (parentBranch === 'main' ? ' main' : ` ${categoryOf(parentBranch)}`);
+        stemsHtml.push(`<path class="${parentCls}" d="${c.trunkExtensionPath}"/>`);
+      }
       if (!c.branchPath) continue;
       const cls = 'phy-stem' + (c.pickBranch === 'main' ? ' main' : ` ${categoryOf(c.pickBranch)}`);
       stemsHtml.push(`<path class="${cls}" d="${c.branchPath}"/>`);
