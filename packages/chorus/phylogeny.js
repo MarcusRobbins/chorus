@@ -303,6 +303,32 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     }
   }
 
+  // Pass 2.5: enforce child.x > primary-parent.x for cross-lane
+  // divergences. The per-lane pass on main can nudge a main commit
+  // forward past the x of a child that branched off it — then the
+  // child's elbow would need to draw backwards (vertical at parent.x
+  // which is right of child.x, then horizontal going LEFT). Walk
+  // commits in timestamp order (parents before children) and push
+  // each cross-lane child past its parent with a gap. Run the per-lane
+  // pass one more time after to restore lane ordering.
+  const MIN_PARENT_CHILD_DX = 28;
+  const byTime = [...commits.values()].sort((a, b) => a.timestamp - b.timestamp);
+  for (const c of byTime) {
+    const p1 = c.parents[0] && commits.get(c.parents[0]);
+    if (!p1 || p1.lane === c.lane) continue;
+    const min = p1.x + MIN_PARENT_CHILD_DX;
+    if (c.x < min) c.x = min;
+  }
+  for (const laneCommits of byLane.values()) {
+    laneCommits.sort((a, b) => a.timestamp - b.timestamp);
+    for (let i = 1; i < laneCommits.length; i++) {
+      const prev = laneCommits[i - 1];
+      const curr = laneCommits[i];
+      const minAllowed = prev.x + MIN_COMMIT_DX;
+      if (curr.x < minAllowed) curr.x = minAllowed;
+    }
+  }
+
   // Pass 3: compute main's DISPLAY endpoint. The real merge commit on
   // main stays at its timestamp-derived x so rejoin elbows land on it
   // correctly. Then we extend main's line with a trailing horizontal
@@ -361,9 +387,12 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
     const mergeCommit = mergeCommitByBranch.get(b.name) || null;
     const mergedBack = !!mergeCommit || (!ownSet?.size && !b.isMain && mainTrunk.has(b.tipSha));
 
-    // Right-angle rejoin elbow (replaces the previous cubic Bezier).
-    // L-shape: lastOwn → horizontal to cornerX → vertical to main lane →
-    // horizontal to mergeCommit.x. Matches the stem style throughout.
+    // Right-angle rejoin elbow. Path: lastOwn → horizontal to cornerX
+    // → vertical down to main lane. Ends AT main's lane; does NOT
+    // extend horizontally along main to mergeCommit.x (that segment
+    // would be coloured branch-colour, putting blue/orange on main's
+    // trunk). Visually the rejoin lands at cornerX instead of exactly
+    // at mergeCommit.x; close enough that the merge-back read is clear.
     let rejoinPath = null;
     const MIN_ELBOW_DX = 40;
     if (mergeCommit && lastOwnCommit) {
@@ -371,7 +400,7 @@ function computeLayout({ commits, branches, mainName }, { width, height }) {
       const cornerX = actualDx >= MIN_ELBOW_DX
         ? mergeCommit.x
         : lastOwnCommit.x + MIN_ELBOW_DX;
-      rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} L ${cornerX},${lastOwnCommit.y} L ${cornerX},${mergeCommit.y} L ${mergeCommit.x},${mergeCommit.y}`;
+      rejoinPath = `M ${lastOwnCommit.x},${lastOwnCommit.y} L ${cornerX},${lastOwnCommit.y} L ${cornerX},${mergeCommit.y}`;
     }
 
     // Fallback dashed pointer for FF-merged / pure-alias branches (no
