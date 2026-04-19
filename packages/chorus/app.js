@@ -59,8 +59,8 @@ const CSS_TEXT = `
     transition: top .2s ease, bottom .2s ease, width .2s ease, max-height .2s ease;
   }
   /* When the phylogeny band is visible, the panel becomes a tall right-
-     hand column abutting the iframe. Width + height + position all
-     derive from CSS variables that drag handles update in unison. */
+     hand column alongside the iframe with a consistent gap between
+     panes (--chorus-pane-gap, 12px default). */
   .panel.with-phylogeny {
     top: 24px;
     right: 24px;
@@ -264,7 +264,7 @@ const CSS_TEXT = `
   /* Phylogeny — floating horizontal band under the iframe */
   .phylogeny-host {
     position: fixed;
-    top: calc(24px + var(--chorus-top-height, 66vh));
+    top: calc(24px + var(--chorus-top-height, 66vh) + var(--chorus-pane-gap, 12px));
     left: 24px;
     right: 24px; /* full-width: panel is a tall column above us, not beside */
     bottom: 24px;
@@ -279,14 +279,15 @@ const CSS_TEXT = `
     backdrop-filter: blur(4px);
   }
 
-  /* Horizontal resize handle between top row (iframe + panel) and the
-     phylogeny. Dragging up grows phylogeny; down grows iframe/panel. */
+  /* Horizontal resize handle centred in the gap between top row and
+     phylogeny. Hit target spans most of the gap; the visible indicator
+     (a 2px bar) is a thinner line inside it that glows on hover/drag. */
   .chorus-resize-h {
     position: fixed;
-    top: calc(24px + var(--chorus-top-height, 66vh) - 4px);
+    top: calc(24px + var(--chorus-top-height, 66vh));
     left: 24px;
     right: 24px;
-    height: 8px;
+    height: var(--chorus-pane-gap, 12px);
     cursor: row-resize;
     pointer-events: auto;
     z-index: 2147483641;
@@ -296,26 +297,23 @@ const CSS_TEXT = `
   .chorus-resize-h::after {
     content: '';
     position: absolute;
-    top: 3px; left: 0; right: 0; height: 2px;
+    top: calc(50% - 1px); left: 20%; right: 20%; height: 2px;
     background: transparent;
     border-radius: 1px;
-    transition: background .1s ease;
+    transition: background .12s ease;
   }
   .chorus-resize-h:hover::after,
   .chorus-resize-h.dragging::after {
     background: #0366d6;
   }
 
-  /* Vertical resize handle between iframe and panel (only visible when
-     the panel is in its with-phylogeny tall-column form). Dragging
-     right grows iframe / shrinks panel; left grows panel / shrinks
-     iframe. */
+  /* Vertical resize handle centred in the gap between iframe and panel. */
   .chorus-resize-v {
     position: fixed;
     top: 24px;
     bottom: calc(100vh - 24px - var(--chorus-top-height, 66vh));
-    right: calc(24px + var(--chorus-panel-width, 420px) - 4px);
-    width: 8px;
+    right: calc(24px + var(--chorus-panel-width, 420px));
+    width: var(--chorus-pane-gap, 12px);
     cursor: col-resize;
     pointer-events: auto;
     z-index: 2147483641;
@@ -325,10 +323,10 @@ const CSS_TEXT = `
   .chorus-resize-v::after {
     content: '';
     position: absolute;
-    left: 3px; top: 0; bottom: 0; width: 2px;
+    left: calc(50% - 1px); top: 20%; bottom: 20%; width: 2px;
     background: transparent;
     border-radius: 1px;
-    transition: background .1s ease;
+    transition: background .12s ease;
   }
   .chorus-resize-v:hover::after,
   .chorus-resize-v.dragging::after {
@@ -881,9 +879,12 @@ function boot({ inIframe = false } = {}) {
     // fill the space to the left of the panel. Otherwise let it revert
     // to its default (62vw).
     if (visible) {
+      // Iframe fills the space from the left margin (24px) up to the
+      // start of the panel (which sits at right:24px with width
+      // --chorus-panel-width), minus the gap between them.
       document.documentElement.style.setProperty(
         '--chorus-iframe-width',
-        'calc(100vw - var(--chorus-panel-width, 420px) - 48px)'
+        'calc(100vw - var(--chorus-panel-width, 420px) - 48px - var(--chorus-pane-gap, 12px))'
       );
     } else {
       document.documentElement.style.removeProperty('--chorus-iframe-width');
