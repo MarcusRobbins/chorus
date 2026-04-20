@@ -1,19 +1,19 @@
 // Figma-style pannable / zoomable board of branch previews, rendered as
-// real live iframes inside a Three.js CSS3DRenderer scene. Cards lay out
-// in a horizontal row at z=0; the camera dollies on Z to zoom, and pans
-// on X/Y to move around. Click a card to smoothly fly the camera in and
-// frame it. Esc or ✕ to close.
+// real live iframes inside a Three.js CSS3DRenderer scene.
 //
-// Three.js (and the CSS3DRenderer addon) is fetched from esm.sh the first
-// time the user opens this view — it's ~150 KB gzipped and chorus shouldn't
-// pay for it at boot. The import is cached for the rest of the session.
+// Layout: a grid. Rows are branches (vertical stacking), columns are page
+// paths (horizontal). The canvas starts with one column — whichever page
+// chorus was already previewing — and grows horizontally as the user
+// clicks links inside any preview. A link click doesn't navigate that
+// iframe; it postMessages the target URL to the canvas, which adds a new
+// column (one card per branch at that page) and flies to the clicked cell.
 //
-// Architecture note: CSS3DRenderer does NOT use WebGL — it applies matrix3d
-// CSS transforms to real DOM elements. That's why iframes in this scene are
-// really alive (can receive events, show live-updating page content) — but
-// we intentionally set pointer-events: none on the iframes so pan drags
-// aren't swallowed by them. A sibling .card-click overlay is the hit
-// target for the "click to zoom-to-card" gesture.
+// Iframes are always interactive. Pan gestures work by dragging from the
+// dark background between cards, or by drag-holding a card's title bar.
+// Click-without-drag on a card's title bar flies to it.
+//
+// Three.js + CSS3DRenderer lazy-loaded from esm.sh on first open so the
+// ~150 KB doesn't touch chorus's boot path.
 
 let THREE = null;
 let CSS3DRenderer = null;
@@ -30,25 +30,22 @@ async function ensureThree() {
   CSS3DObject = addon.CSS3DObject;
 }
 
-// Card geometry in world units. These are arbitrary; what matters is the
-// aspect ratio (looks ~16:10-ish to mimic a desktop browser window) and
-// the gap-to-card ratio (enough breathing room that cards don't look
-// crowded when the whole row is visible).
+// Card geometry in world units. Aspect ~16:10, generous gaps so the grid
+// feels airy at zoom-out.
 const CARD_W = 1280;
 const CARD_H = 800;
-const CARD_GAP = 320;
+const COL_GAP = 360;
+const ROW_GAP = 240;
 const CAMERA_FOV = 50;
 const CAMERA_Z_MIN = 400;
-const CAMERA_Z_MAX = 20000;
+const CAMERA_Z_MAX = 40000;
 
-// Public factory. Caller owns the returned { destroy } handle and must
-// call destroy() when closing, which tears down the RAF loop + window
-// listeners + removes the overlay from the shadow root.
 export async function createCanvas({
   hostRoot,           // ShadowRoot to attach the overlay to
-  branches,           // [{ name, ... }] — chorus's in-memory list
-  previewUrlFor,      // (branchName) => url (from app.js)
-  onClose,            // () => void — called when the user dismisses
+  branches,           // [{ name, ... }]
+  previewUrlFor,      // (branchName, path) => url
+  initialPath,        // string — the page path chorus was already showing
+  onClose,            // () => void
 }) {
   await ensureThree();
 
@@ -63,10 +60,9 @@ export async function createCanvas({
   overlay.appendChild(closeBtn);
   closeBtn.addEventListener('click', () => { destroy(); onClose?.(); });
 
-  // Zoom-level hint at the bottom-left.
   const hint = document.createElement('div');
   hint.className = 'chorus-canvas-hint';
-  hint.textContent = 'Drag to pan · Wheel to zoom · Click a card to fly to it';
+  hint.textContent = 'Drag background or header to pan · Wheel to zoom · Click a card header to fly to it · Click links inside to spawn new tiles';
   overlay.appendChild(hint);
 
   // Scene + camera + renderer ----------------------------------------------
@@ -77,7 +73,7 @@ export async function createCanvas({
     1,
     CAMERA_Z_MAX * 2,
   );
-  camera.position.set(0, 0, 4000);
+  camera.position.set(0, 0, 6000);
 
   const renderer = new CSS3DRenderer();
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -87,14 +83,33 @@ export async function createCanvas({
   rendererEl.style.left = '0';
   rendererEl.style.width = '100%';
   rendererEl.style.height = '100%';
-  // The renderer's root receives our pointer events so pan/wheel work
-  // anywhere on the canvas, not just the dark backdrop between cards.
   rendererEl.style.pointerEvents = 'auto';
   overlay.appendChild(rendererEl);
 
-  // Build cards -----------------------------------------------------------
-  const ordered = orderBranches(branches);
-  const cards = ordered.map((b, i) => {
+  // Grid state -----------------------------------------------------------
+  // Rows (branches) are fixed at open time. Columns (page paths) grow as
+  // the user clicks links. cards is a flat array; each card knows its
+  // (row, col) indices.
+  const rows = orderBranches(branches);
+  const cols = [initialPath || 'index.html'];
+  const cards = [];
+
+  function cellPosition(row, col) {
+    const x = (col - (cols.length - 1) / 2) * (CARD_W + COL_GAP);
+    const y = ((rows.length - 1) / 2 - row) * (CARD_H + ROW_GAP);
+    return { x, y };
+  }
+
+  // Re-emit positions for every card. Called after cols grows so existing
+  // cards recentre around the new total width.
+  function layoutCards() {
+    for (const c of cards) {
+      const pos = cellPosition(c.row, c.col);
+      c.obj.position.set(pos.x, pos.y, 0);
+    }
+  }
+
+  function makeCard(branch, path, row, col) {
     const el = document.createElement('div');
     el.className = 'chorus-canvas-card';
     el.style.width = CARD_W + 'px';
@@ -103,63 +118,74 @@ export async function createCanvas({
     const hdr = document.createElement('div');
     hdr.className = 'chorus-canvas-card-hdr';
     const marker = document.createElement('span');
-    marker.className = 'chorus-canvas-card-marker ' + markerClass(b.name);
+    marker.className = 'chorus-canvas-card-marker ' + markerClass(branch.name);
     hdr.appendChild(marker);
     const title = document.createElement('span');
     title.className = 'chorus-canvas-card-title';
-    title.textContent = b.name;
+    title.textContent = branch.name;
     hdr.appendChild(title);
+    const subtitle = document.createElement('span');
+    subtitle.className = 'chorus-canvas-card-subtitle';
+    subtitle.textContent = path;
+    hdr.appendChild(subtitle);
     el.appendChild(hdr);
 
     const iframe = document.createElement('iframe');
-    iframe.src = previewUrlFor(b.name);
+    iframe.src = previewUrlFor(branch.name, path);
     iframe.className = 'chorus-canvas-card-frame';
-    // pointer-events is set via CSS, NOT inline. That lets the .active
-    // class on a card flip pointer-events: auto on its iframe (an inline
-    // style would beat the CSS specificity and the toggle wouldn't work).
     el.appendChild(iframe);
 
-    // Transparent hit overlay for the "click this card to fly to it"
-    // gesture. Covers the iframe area but not the header (so future
-    // header actions can be clickable).
-    const click = document.createElement('div');
-    click.className = 'chorus-canvas-card-click';
-    click.dataset.branch = b.name;
-    el.appendChild(click);
+    // Once the iframe is loaded, tell its inner chorus (via postMessage) to
+    // intercept link clicks — relay them to us instead of navigating.
+    iframe.addEventListener('load', () => {
+      try {
+        iframe.contentWindow?.postMessage({ type: 'chorus:parent:intercept-links' }, '*');
+      } catch {}
+    });
 
     const obj = new CSS3DObject(el);
-    obj.position.x = (i - (ordered.length - 1) / 2) * (CARD_W + CARD_GAP);
-    obj.position.y = 0;
-    obj.position.z = 0;
+    const pos = cellPosition(row, col);
+    obj.position.set(pos.x, pos.y, 0);
     scene.add(obj);
 
-    return { branch: b, el, obj, click };
+    return { branch, path, row, col, el, hdr, iframe, obj };
+  }
+
+  // Initial fill: rows × cols at open
+  rows.forEach((b, row) => {
+    cols.forEach((p, col) => {
+      cards.push(makeCard(b, p, row, col));
+    });
   });
 
-  // Which card (if any) is currently in interactive mode. While active:
-  //   - its .card-click overlay is display:none so the iframe receives events
-  //   - its .card iframe has pointer-events:auto (click/scroll/type into it)
-  //   - a subtle accent ring highlights the card as "focused"
-  // All managed via a .active class on the card element — CSS does the rest.
-  let activeCard = null;
-  function setActiveCard(next) {
-    if (activeCard === next) return;
-    if (activeCard) activeCard.el.classList.remove('active');
-    activeCard = next;
-    if (activeCard) activeCard.el.classList.add('active');
-    updateHint();
+  // Add a new column for this page path. Idempotent: if path already has
+  // a column, returns the existing col index without rebuilding.
+  function addColumn(path) {
+    const existing = cols.indexOf(path);
+    if (existing >= 0) return existing;
+    const newCol = cols.length;
+    cols.push(path);
+    // Existing cards need their X recomputed (the grid recentres as cols
+    // grow). New cards get positioned by cellPosition naturally.
+    rows.forEach((b, row) => {
+      cards.push(makeCard(b, path, row, newCol));
+    });
+    layoutCards();
+    return newCol;
   }
-  function updateHint() {
-    hint.textContent = activeCard
-      ? 'Interacting with ' + activeCard.branch.name + ' · Esc or click outside to exit'
-      : 'Drag to pan · Wheel to zoom · Click a card to fly in and interact';
-  }
-  updateHint();
 
-  // Unified pointer handling: pan + click-to-fly disambiguated by how far
-  // the pointer moved between down and up. Below MOVE_THRESHOLD px = click.
+  function cardAt(row, col) {
+    return cards.find((c) => c.row === row && c.col === col);
+  }
+
+  // Pan / click-to-fly handling ------------------------------------------
+  // Drag anywhere on the canvas (including card headers) to pan. A
+  // pointerup without meaningful movement on a header = fly to that card.
+  // Clicks inside iframes never reach us — cross-origin isolation — so
+  // those Just Work as normal page interactions.
   const MOVE_THRESHOLD = 4;
-  let pointer = null;       // { x, y, cx, cy, target, panning }
+  let pointer = null;
+
   const onPointerDown = (e) => {
     pointer = {
       x: e.clientX, y: e.clientY,
@@ -176,13 +202,11 @@ export async function createCanvas({
     if (!pointer.panning && Math.hypot(dx, dy) < MOVE_THRESHOLD) return;
     pointer.panning = true;
     overlay.classList.add('panning');
-    // Convert screen-pixel delta to world-space delta at the camera's
-    // current Z. With FOV, viewport_height_world = 2 · z · tan(fov/2).
     const fovRad = (camera.fov * Math.PI) / 180;
     const worldH = 2 * camera.position.z * Math.tan(fovRad / 2);
     const pxToWorld = worldH / window.innerHeight;
     camera.position.x = pointer.cx - dx * pxToWorld;
-    camera.position.y = pointer.cy + dy * pxToWorld; // +Y up in Three space
+    camera.position.y = pointer.cy + dy * pxToWorld;
   };
   const onPointerUp = (e) => {
     if (!pointer) return;
@@ -192,40 +216,26 @@ export async function createCanvas({
     const target = pointer.target;
     pointer = null;
     if (!wasClick) return;
-    // Click on active card's own surface (e.g. its header) while active:
-    // ignore. The iframe itself consumes events directly; this only fires
-    // for non-iframe parts like the card header.
-    if (activeCard && target?.closest?.('.chorus-canvas-card.active')) return;
-    // Click on any card's hit overlay → fly + activate (swaps active if
-    // another card was already active).
-    const hit = target?.closest?.('.chorus-canvas-card-click');
-    if (hit) {
-      const card = cards.find((c) => c.click === hit);
-      if (card) {
-        flyToCard(card);
-        setActiveCard(card);
-      }
-      return;
-    }
-    // Clicked empty background. If a card is active, deactivate it
-    // (return to pan-and-pick mode). Otherwise do nothing.
-    if (activeCard) setActiveCard(null);
+    const hdr = target?.closest?.('.chorus-canvas-card-hdr');
+    if (!hdr) return;
+    const card = cards.find((c) => c.hdr === hdr);
+    if (card) flyToCard(card);
   };
   rendererEl.addEventListener('pointerdown', onPointerDown);
   rendererEl.addEventListener('pointermove', onPointerMove);
   rendererEl.addEventListener('pointerup', onPointerUp);
   rendererEl.addEventListener('pointercancel', onPointerUp);
 
-  // Wheel to zoom (camera dollies on Z). Preserves the world point under
-  // the cursor by nudging camera X/Y proportionally — otherwise zoom-in
-  // always pulls toward the origin, which feels broken.
+  // Cursor-anchored wheel zoom — the point under the pointer stays put as
+  // the camera dollies. When the pointer is over an iframe's interior,
+  // this doesn't fire (iframe owns the wheel and scrolls its page), which
+  // is the right call for "scroll the previewed page vs. zoom the canvas".
   const onWheel = (e) => {
     e.preventDefault();
     const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
     const prevZ = camera.position.z;
     const newZ = clamp(prevZ * factor, CAMERA_Z_MIN, CAMERA_Z_MAX);
     if (newZ === prevZ) return;
-    // Point under cursor in world coords at prev zoom
     const rect = rendererEl.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
@@ -235,8 +245,6 @@ export async function createCanvas({
     const worldPointX = camera.position.x + (cx - rect.width / 2) * pxToWorldPrev;
     const worldPointY = camera.position.y - (cy - rect.height / 2) * pxToWorldPrev;
     camera.position.z = newZ;
-    // At the new zoom, recompute the world point under the cursor and
-    // shift camera so it lands on the same world coord.
     const worldHNew = 2 * newZ * Math.tan(fovRad / 2);
     const pxToWorldNew = worldHNew / rect.height;
     const newWorldPointX = camera.position.x + (cx - rect.width / 2) * pxToWorldNew;
@@ -246,9 +254,7 @@ export async function createCanvas({
   };
   rendererEl.addEventListener('wheel', onWheel, { passive: false });
 
-  // Camera animation -----------------------------------------------------
-  // Simple property tween on camera.position over duration ms. Only one
-  // animation at a time; a new flyTo clobbers the previous.
+  // Camera tween ---------------------------------------------------------
   let anim = null;
   function startAnim(tx, ty, tz, duration = 700) {
     anim = {
@@ -265,23 +271,40 @@ export async function createCanvas({
   function flyToCard(card, padding = 1.12) {
     const fovRad = (camera.fov * Math.PI) / 180;
     const aspect = window.innerWidth / window.innerHeight;
-    // Z needed so the card fits in the viewport at FOV — pick the tighter
-    // of "height fits" and "width fits" constraints.
     const zForH = (CARD_H * padding) / (2 * Math.tan(fovRad / 2));
     const zForW = (CARD_W * padding) / (2 * Math.tan(fovRad / 2) * aspect);
     startAnim(card.obj.position.x, card.obj.position.y, Math.max(zForH, zForW), 650);
   }
 
-  function flyToAll(padding = 1.12) {
-    const totalW = ordered.length * CARD_W + Math.max(0, ordered.length - 1) * CARD_GAP;
+  function flyToAll(padding = 1.18) {
+    const totalW = cols.length * CARD_W + Math.max(0, cols.length - 1) * COL_GAP;
+    const totalH = rows.length * CARD_H + Math.max(0, rows.length - 1) * ROW_GAP;
     const fovRad = (camera.fov * Math.PI) / 180;
     const aspect = window.innerWidth / window.innerHeight;
-    const zForH = (CARD_H * padding) / (2 * Math.tan(fovRad / 2));
+    const zForH = (totalH * padding) / (2 * Math.tan(fovRad / 2));
     const zForW = (totalW * padding) / (2 * Math.tan(fovRad / 2) * aspect);
     startAnim(0, 0, Math.max(zForH, zForW, 2500), 800);
   }
 
-  // RAF loop --------------------------------------------------------------
+  // Link-click message handler. Inner chorus in any canvas iframe sends a
+  // 'chorus:preview:link' with the absolute URL when a same-origin link
+  // is clicked; we resolve that to a repo-relative path, add a column for
+  // it (or reuse an existing one), and fly to the cell matching the
+  // source card's branch.
+  const onMessage = (e) => {
+    const d = e.data;
+    if (!d || d.type !== 'chorus:preview:link') return;
+    const sourceCard = cards.find((c) => c.iframe?.contentWindow === e.source);
+    if (!sourceCard) return;
+    const path = normalizeLinkToRepoPath(d.href || '', sourceCard.path);
+    if (!path) return;
+    const col = addColumn(path);
+    const card = cardAt(sourceCard.row, col);
+    if (card) flyToCard(card);
+  };
+  window.addEventListener('message', onMessage);
+
+  // RAF loop -------------------------------------------------------------
   let rafId = null;
   function tick() {
     if (anim) {
@@ -298,7 +321,6 @@ export async function createCanvas({
   }
   tick();
 
-  // Resize, escape, fit-all-on-open --------------------------------------
   const onResize = () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -308,22 +330,18 @@ export async function createCanvas({
 
   const onKey = (e) => {
     if (e.key !== 'Escape') return;
-    // Esc exits active mode first (so the user can get out of an iframe
-    // without closing the whole canvas). Only when already in pan mode
-    // does Esc close the canvas.
-    if (activeCard) { setActiveCard(null); return; }
     destroy();
     onClose?.();
   };
   document.addEventListener('keydown', onKey);
 
-  // Give iframes a beat to start loading before the fit animation kicks in.
   setTimeout(() => flyToAll(), 60);
 
   function destroy() {
     cancelAnimationFrame(rafId);
     rafId = null;
     window.removeEventListener('resize', onResize);
+    window.removeEventListener('message', onMessage);
     document.removeEventListener('keydown', onKey);
     rendererEl.removeEventListener('pointerdown', onPointerDown);
     rendererEl.removeEventListener('pointermove', onPointerMove);
@@ -333,11 +351,12 @@ export async function createCanvas({
     overlay.remove();
   }
 
-  return { destroy, flyToCard, flyToAll };
+  return { destroy, flyToCard, flyToAll, addColumn };
 }
 
-// Order: main first, then feature/, then auto/, then the rest. Matches the
-// ordering the list view uses.
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+// Main/master first, then feature/, then auto/, then rest.
 function orderBranches(branches) {
   const main = branches.find((b) => b.name === 'main' || b.name === 'master');
   const features = branches.filter((b) => b.name.startsWith('feature/'));
@@ -358,3 +377,23 @@ function markerClass(name) {
 }
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+// Convert a link click's full URL into a repo-relative path that the
+// parent's previewUrlFor can consume. The iframe's location lives on
+// rawcdn.githack and looks like:
+//   https://rawcdn.githack.com/<owner>/<repo>/<sha>/<path>
+// So we match the pathname and take the tail. For raw.githack (branch-
+// based, not SHA-pinned) the shape is the same — /<owner>/<repo>/<ref>/<path>.
+// Falls back to the current cell's path if we can't parse.
+function normalizeLinkToRepoPath(fullHref, fallbackPath) {
+  try {
+    const u = new URL(fullHref);
+    const m = u.pathname.match(/^\/[^/]+\/[^/]+\/[^/]+\/(.+)$/);
+    if (!m) return fallbackPath;
+    let path = m[1];
+    if (path.endsWith('/')) path += 'index.html';
+    return path + u.search + u.hash;
+  } catch {
+    return fallbackPath;
+  }
+}

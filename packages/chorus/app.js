@@ -1225,13 +1225,20 @@ const CSS_TEXT = `
     overflow: hidden;
     font-family: var(--font-sans);
   }
+  /* Card header is both the drag handle (pan the canvas) and the fly-to
+     target (click without drag = fly to this card). Cursor: grab to
+     signal that. The iframe below is always interactive — no focus
+     mode, no click-overlay. */
   .chorus-canvas-card-hdr {
     display: flex; align-items: center; gap: 12px;
     height: 48px; padding: 0 18px;
     background: linear-gradient(to bottom, #fafafa, #f3f3f5);
     border-bottom: 1px solid #e4e4e7;
     box-sizing: border-box;
+    cursor: grab;
+    user-select: none;
   }
+  .chorus-canvas-card-hdr:active { cursor: grabbing; }
   .chorus-canvas-card-marker {
     display: inline-block;
     width: 10px; height: 10px; border-radius: 999px;
@@ -1246,40 +1253,22 @@ const CSS_TEXT = `
     color: #18181b;
     letter-spacing: -0.01em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex-shrink: 0;
+  }
+  .chorus-canvas-card-subtitle {
+    font-family: var(--font-mono); font-size: 12px; color: #71717a;
+    margin-left: auto;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 50%;
   }
   .chorus-canvas-card-frame {
     position: absolute;
     top: 48px; left: 0;
     width: 100%; height: calc(100% - 48px);
     border: 0;
-    /* pointer-events is also set inline; CSS here is a belt-and-braces */
-    pointer-events: none;
-  }
-  .chorus-canvas-card-click {
-    position: absolute;
-    top: 48px; left: 0; right: 0; bottom: 0;
-    pointer-events: auto;
-    cursor: pointer;
-    /* Subtle hover tint to show the card is clickable */
-    transition: background 180ms ease;
-  }
-  .chorus-canvas-card-click:hover {
-    background: rgba(79, 70, 229, 0.04);
-  }
-  /* Active / focused card — iframe becomes interactive, click-overlay
-     steps aside, and a subtle accent ring highlights which card you're
-     "in". Esc or a click on the canvas background pops back out. */
-  .chorus-canvas-card.active {
-    box-shadow:
-      0 40px 100px rgba(0, 0, 0, 0.65),
-      0 18px 44px rgba(0, 0, 0, 0.4),
-      0 0 0 3px rgba(79, 70, 229, 0.75);
-  }
-  .chorus-canvas-card.active .chorus-canvas-card-frame {
-    pointer-events: auto;
-  }
-  .chorus-canvas-card.active .chorus-canvas-card-click {
-    display: none;
+    /* Iframes are always interactive. Clicks, scrolling, typing — all
+       reach the previewed page directly. Pan gestures work from the
+       background or the card header (neither is covered by the iframe). */
   }
 
   /* Per-comment action row + pin/branch badges */
@@ -1767,7 +1756,36 @@ function bootPreviewMode() {
     if (d.type === 'chorus:parent:start-pick') startPick();
     if (d.type === 'chorus:parent:cancel-pick') cancelPick();
     if (d.type === 'chorus:parent:render-pins') renderPins(d.pins || []);
+    if (d.type === 'chorus:parent:intercept-links') interceptLinks = true;
+    if (d.type === 'chorus:parent:release-links') interceptLinks = false;
   });
+
+  // Link interception. Off by default — the single-preview flow wants
+  // normal in-iframe navigation. The canvas view postMessages
+  // 'chorus:parent:intercept-links' to each iframe after load, flipping
+  // this on so same-origin link clicks are captured and relayed back to
+  // the parent (which spawns a new tile) rather than navigating in place.
+  let interceptLinks = false;
+  document.addEventListener('click', (e) => {
+    if (!interceptLinks) return;
+    const link = e.target?.closest?.('a');
+    if (!link) return;
+    const href = link.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+    let url;
+    try { url = new URL(href, location.href); } catch { return; }
+    // External links keep default navigation (likely opening in new tab
+    // via target=_blank anyway).
+    if (url.origin !== location.origin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      window.parent.postMessage({
+        type: 'chorus:preview:link',
+        href: url.href,
+      }, '*');
+    } catch {}
+  }, true);
 
   // Element-pinned discussion badges. Rendered into a fixed overlay that
   // sits above the page content. On scroll/resize we reposition so pins
@@ -2629,6 +2647,7 @@ function boot({ inIframe = false } = {}) {
         hostRoot: root,
         branches: state.branches || [],
         previewUrlFor,
+        initialPath: state.currentPath || 'index.html',
         onClose: () => {
           state.canvasOpen = false;
           state.canvasInstance = null;
