@@ -1378,6 +1378,53 @@ const CSS_TEXT = `
 `;
 
 // ───────────────────────────────────────────────────────────────────
+// Shared helper: capture a small JPEG thumbnail of a DOM element using
+// html2canvas (lazy-loaded from esm.sh on first call, cached). Used both
+// by the outer boot()'s picker AND by the inner bootPreviewMode()'s
+// pick — so it lives at module scope.
+// ───────────────────────────────────────────────────────────────────
+const THUMB_MAX_W = 320;
+const THUMB_MAX_H = 160;
+const THUMB_QUALITY = 0.62;
+let _html2canvasPromise = null;
+async function loadHtml2Canvas() {
+  if (!_html2canvasPromise) {
+    _html2canvasPromise = import('https://esm.sh/html2canvas@1.4.1')
+      .then((m) => m.default || m);
+  }
+  return _html2canvasPromise;
+}
+async function captureElementThumbnail(el) {
+  if (!el) return null;
+  try {
+    const html2canvas = await loadHtml2Canvas();
+    const canvas = await html2canvas(el, {
+      backgroundColor: null,
+      logging: false,
+      useCORS: true,
+    });
+    const srcW = canvas.width;
+    const srcH = canvas.height;
+    if (!srcW || !srcH) return null;
+    const scale = Math.min(THUMB_MAX_W / srcW, THUMB_MAX_H / srcH, 1);
+    const thumbW = Math.max(1, Math.round(srcW * scale));
+    const thumbH = Math.max(1, Math.round(srcH * scale));
+    const thumb = document.createElement('canvas');
+    thumb.width = thumbW;
+    thumb.height = thumbH;
+    const ctx = thumb.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, thumbW, thumbH);
+    ctx.drawImage(canvas, 0, 0, thumbW, thumbH);
+    return thumb.toDataURL('image/jpeg', THUMB_QUALITY);
+  } catch (err) {
+    // Best-effort — many pages have tainted canvases, cross-origin images,
+    // exotic CSS that trips html2canvas, etc. Pin still saves without a thumb.
+    return null;
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Entry: dispatch between preview-mode (in iframe) vs full app (top-level)
 // ───────────────────────────────────────────────────────────────────
 if (window.__chorusLoaded) {
@@ -1602,7 +1649,7 @@ function bootPreviewMode() {
     overlay.style.width = r.width + 'px';
     overlay.style.height = r.height + 'px';
   }
-  function onClick(e) {
+  async function onClick(e) {
     e.preventDefault(); e.stopPropagation();
     const el = realTarget(e);
     if (!(el instanceof Element)) return;
@@ -1614,6 +1661,13 @@ function bootPreviewMode() {
       rect: { x: r.left, y: r.top, w: r.width, h: r.height },
       url: location.href,
     };
+    // Capture a thumbnail of the picked element BEFORE the overlay is
+    // torn down, so the rendering reflects the element as the user saw
+    // it at click time. Best-effort — html2canvas returns null on failure.
+    try {
+      const thumb = await captureElementThumbnail(el);
+      if (thumb) capture.thumb = thumb;
+    } catch { /* best-effort */ }
     try { window.parent.postMessage({ type: 'chorus:preview:capture', capture }, '*'); } catch {}
     cancelPick(false);
   }
@@ -4489,53 +4543,6 @@ function boot({ inIframe = false } = {}) {
   function onPickKey(e) { if (e.key === 'Escape') exitPickMode(); }
   function isOurs(el) { return host.contains(el) || el === host; }
 
-  // Capture a small JPEG thumbnail of a DOM element. Lazy-loads html2canvas
-  // on first pin so the library isn't fetched for users who never pin
-  // anything. Caches the module on window to avoid repeated imports.
-  // Returns a data:image/jpeg URL, or null if rendering fails (tainted
-  // canvas, cross-origin images without CORS, etc.).
-  const THUMB_MAX_W = 320;
-  const THUMB_MAX_H = 160;
-  const THUMB_QUALITY = 0.62;
-  let _html2canvasPromise = null;
-  async function loadHtml2Canvas() {
-    if (!_html2canvasPromise) {
-      _html2canvasPromise = import('https://esm.sh/html2canvas@1.4.1')
-        .then((m) => m.default || m);
-    }
-    return _html2canvasPromise;
-  }
-  async function captureElementThumbnail(el) {
-    if (!el) return null;
-    try {
-      const html2canvas = await loadHtml2Canvas();
-      const canvas = await html2canvas(el, {
-        backgroundColor: null,
-        logging: false,
-        useCORS: true,
-        scale: window.devicePixelRatio > 1 ? 1 : 1,
-      });
-      const srcW = canvas.width;
-      const srcH = canvas.height;
-      if (!srcW || !srcH) return null;
-      const scale = Math.min(THUMB_MAX_W / srcW, THUMB_MAX_H / srcH, 1);
-      const thumbW = Math.max(1, Math.round(srcW * scale));
-      const thumbH = Math.max(1, Math.round(srcH * scale));
-      const thumb = document.createElement('canvas');
-      thumb.width = thumbW;
-      thumb.height = thumbH;
-      const ctx = thumb.getContext('2d');
-      // Light checker background so transparent captures read as "image".
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, thumbW, thumbH);
-      ctx.drawImage(canvas, 0, 0, thumbW, thumbH);
-      return thumb.toDataURL('image/jpeg', THUMB_QUALITY);
-    } catch (err) {
-      if (DEBUG) console.warn('[chorus] thumb capture failed', err);
-      return null;
-    }
-  }
-
   // ═══════════════════════════════════════════════════════════════
   // GitHub device flow
   // ═══════════════════════════════════════════════════════════════
@@ -5231,8 +5238,28 @@ function boot({ inIframe = false } = {}) {
       window.dispatchEvent(new CustomEvent('chorus:preview:location', { detail: d }));
     }
     if (d.type === 'chorus:preview:capture') {
-      state.capture = d.capture || null;
+      const capture = d.capture || null;
       state.pickMode = false;
+      // Retroactive-pin paths (thread OP or a specific comment) win over
+      // the default propose-flow route. Without this, Pin/Re-pin from the
+      // thread view would leave the button stuck on "Picking…" because
+      // the incoming capture never reaches applyThreadPin/applyCommentPin.
+      if (capture && state.pinningThreadNumber) {
+        const number = state.pinningThreadNumber;
+        state.pinningThreadNumber = null;
+        openPanel();
+        applyThreadPin(number, capture).catch(() => {});
+        return;
+      }
+      if (capture && state.pinningCommentId) {
+        const id = state.pinningCommentId;
+        state.pinningCommentId = null;
+        openPanel();
+        applyCommentPin(id, capture).catch(() => {});
+        return;
+      }
+      // Default: drive the propose flow.
+      state.capture = capture;
       openPanel();
       // If the capture is the result of the user explicitly picking an
       // element to start a new thread (i.e. they're NOT already in a
@@ -5246,6 +5273,10 @@ function boot({ inIframe = false } = {}) {
     }
     if (d.type === 'chorus:preview:cancelled') {
       state.pickMode = false;
+      // Clear any retroactive-pin intent so the button doesn't get stuck
+      // on "Picking…" when the user escapes the picker.
+      state.pinningThreadNumber = null;
+      state.pinningCommentId = null;
       openPanel();
     }
     if (d.type === 'chorus:preview:thread-open') {
