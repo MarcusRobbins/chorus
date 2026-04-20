@@ -830,42 +830,57 @@ const CSS_TEXT = `
   }
   .thread-item-meta { font-size: 11px; }
 
-  /* Thread view — pin summary + discussion */
-  .thread-pin {
+  /* Pin card — shared between propose screen and thread view. Filled
+     (a real element pinned) gets the accent colour; empty gets a muted
+     surface. Always a flex row: dot + info + actions. */
+  .pin-card {
     display: flex; gap: 10px; align-items: flex-start;
     padding: 10px 12px;
+    border-radius: var(--r-md);
     background: var(--c-accent-bg);
     border: 1px solid color-mix(in srgb, var(--c-accent) 20%, transparent);
-    border-radius: var(--r-md);
   }
-  .thread-pin-dot {
+  .pin-card.empty {
+    background: var(--c-bg-subtle);
+    border-color: var(--c-border);
+  }
+  .pin-card-dot {
     width: 12px; height: 12px; border-radius: 999px;
+    background: var(--c-bg-muted);
+    box-shadow: inset 0 0 0 1px var(--c-border);
+    flex-shrink: 0; margin-top: 3px;
+  }
+  .pin-card-dot.filled {
     background: var(--grad-accent);
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2),
                 0 0 0 3px color-mix(in srgb, var(--c-accent) 15%, transparent);
-    flex-shrink: 0; margin-top: 2px;
   }
-  .thread-pin-info {
+  .pin-card-info {
     flex: 1 1 auto; min-width: 0;
-  }
-  .thread-pin-el {
-    font-family: var(--font-mono); font-size: 12px; color: var(--c-accent-fg);
+    font-family: var(--font-mono); font-size: 12px;
+    color: var(--c-accent-fg);
     word-break: break-all;
+    line-height: 1.5;
   }
-  .thread-pin-el.empty {
+  .pin-card.empty .pin-card-info {
     font-family: var(--font-sans);
     color: var(--c-text-muted);
     font-style: italic;
   }
-  /* Unpinned variant: a softer surface that reads as "optional context" */
-  .thread-pin.unpinned {
-    background: var(--c-bg-subtle);
-    border-color: var(--c-border);
+  .pin-card-el {
+    font-family: var(--font-mono); font-size: 12px; color: var(--c-accent-fg);
+    word-break: break-all;
   }
-  .thread-pin.unpinned .thread-pin-dot {
-    background: var(--c-bg-muted);
-    box-shadow: inset 0 0 0 1px var(--c-border);
+  .pin-card-el.empty {
+    font-family: var(--font-sans);
+    color: var(--c-text-muted);
+    font-style: italic;
   }
+  .pin-card-actions {
+    display: flex; gap: 4px; flex-shrink: 0;
+    align-items: center;
+  }
+
   .thread-discussion {
     display: flex; flex-direction: column; gap: 8px;
   }
@@ -1016,35 +1031,6 @@ const CSS_TEXT = `
   .feature-header-desc {
     font-size: 12px; color: var(--c-text-muted);
     line-height: 1.5;
-  }
-
-  /* Feature chip (used in propose to show the in-feature context) */
-  .feature-chip-row {
-    display: flex; align-items: center; gap: 8px;
-    margin: 4px 0 8px;
-  }
-  .feature-chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 6px 3px 8px;
-    border-radius: 999px;
-    background: var(--c-accent-bg);
-    color: var(--c-accent-fg, var(--c-accent));
-    font-size: 11.5px;
-  }
-  .feature-chip code {
-    background: transparent; padding: 0; font-size: 11.5px;
-    color: inherit;
-  }
-  .feature-chip-x {
-    background: transparent; border: none; cursor: pointer;
-    color: inherit; font: inherit; font-size: 11px;
-    padding: 0 2px; border-radius: 999px;
-    opacity: 0.7;
-    transition: opacity var(--t-fast), background var(--t-fast);
-  }
-  .feature-chip-x:hover {
-    opacity: 1;
-    background: rgba(0, 0, 0, 0.05);
   }
 
   /* Empty state card */
@@ -2467,24 +2453,48 @@ function boot({ inIframe = false } = {}) {
   // ═══════════════════════════════════════════════════════════════
   function proposeHtml() {
     const capture = state.capture;
-    const captureClass = capture ? 'capture' : 'capture empty';
-    const captureText = capture
-      ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
-      : 'No element pinned (optional — you can pin one now or later from the thread).';
-    const featureTag = state.pendingFeatureTag;
-    return `
-      <p class="muted">Start a thread. Optionally pin it to an element on the page — you can always pin one later from the thread view.</p>
-      ${featureTag ? `
-        <div class="feature-chip-row">
-          <span class="muted-s">in feature:</span>
-          <span class="feature-chip"><code>${esc(featureTag)}</code>
-            <button class="feature-chip-x" data-action="clear-feature-tag" title="Remove feature tag">✕</button>
-          </span>
+    const captureInfo = capture
+      ? `<${esc(capture.tag)}> ${esc(capture.selector)}${capture.text ? ` — "${esc(capture.text.slice(0, 60))}"` : ''}`
+      : 'No element pinned <span class="muted-s">(optional)</span>';
+    const features = state.features || [];
+    // Pick the selected feature: the user's set value, falling back to the
+    // first feature so the form never submits with no feature set.
+    const selected = (state.pendingFeatureTag && features.some((f) => f.name === state.pendingFeatureTag))
+      ? state.pendingFeatureTag
+      : (features[0]?.name || '');
+    const featurePickerHtml = features.length === 0
+      ? `
+        <div class="empty-state">
+          <div class="empty-state-title">You need a feature first</div>
+          <div class="muted-s">Every thread lives inside a feature — topic scopes like <code>auth</code> or <code>pricing</code>. <button class="link-btn" data-action="goto-features-menu">Create one</button>, then come back.</div>
         </div>
-      ` : ''}
-      <div>
-        <div class="muted-s" style="margin-bottom:6px;">Pinned element <span style="opacity:0.7">(optional)</span></div>
-        <div class="${captureClass}">${esc(captureText)}</div>
+      `
+      : `
+        <label class="field">
+          Feature
+          <select data-field="propose-feature">
+            ${features.map((f) => `
+              <option value="${esc(f.name)}" ${f.name === selected ? 'selected' : ''}>${esc(f.name)}</option>
+            `).join('')}
+          </select>
+          <div class="muted-s" style="margin-top:4px;">Every thread lives inside a feature. Pick the one this belongs to.</div>
+        </label>
+      `;
+    const pickBtn = state.pickMode
+      ? `<button class="link-btn" data-action="pick">Cancel pick</button>`
+      : capture
+        ? `<button class="link-btn" data-action="pick">Re-pin</button>
+           <button class="link-btn" data-action="clear-capture">Unpin</button>`
+        : `<button class="link-btn" data-action="pick">Pin element</button>`;
+    return `
+      <p class="muted">Start a thread. Pinning to an element is optional — you can pin now or from the thread later.</p>
+
+      ${featurePickerHtml}
+
+      <div class="pin-card ${capture ? '' : 'empty'}">
+        <div class="pin-card-dot ${capture ? 'filled' : ''}"></div>
+        <div class="pin-card-info">${captureInfo}</div>
+        <div class="pin-card-actions">${pickBtn}</div>
       </div>
       <label class="field">
         What's on your mind?
@@ -2495,17 +2505,13 @@ function boot({ inIframe = false } = {}) {
   }
 
   function proposeActions() {
-    const hasText = state.description.trim();
-    const canStart = hasText && !state.filing;
+    const hasText = !!state.description.trim();
+    const features = state.features || [];
+    const hasFeature = features.length > 0;
+    const canStart = hasText && hasFeature && !state.filing;
     const startLabel = state.filing ? 'Starting…' : 'Start thread';
-    const pickLabel = state.pickMode
-      ? 'Cancel pick'
-      : (state.capture ? 'Re-pick element' : 'Pin element');
     return `
-      <div class="secondary">
-        <button data-action="pick">${pickLabel}</button>
-        ${state.capture ? `<button data-action="clear-capture">Unpin</button>` : ''}
-      </div>
+      <div class="secondary"></div>
       <button class="primary" data-action="start-discussion" ${canStart ? '' : 'disabled'}>${startLabel}</button>
     `;
   }
@@ -2938,17 +2944,19 @@ function boot({ inIframe = false } = {}) {
     const pinBtnLabel = pinning ? 'Picking…' : (hasPin ? 'Re-pin' : 'Pin to element');
     const comments = t.comments || [];
     return `
-      <div class="thread-pin ${hasPin ? '' : 'unpinned'}">
-        <div class="thread-pin-dot"></div>
-        <div class="thread-pin-info">
+      <div class="pin-card ${hasPin ? '' : 'empty'}">
+        <div class="pin-card-dot ${hasPin ? 'filled' : ''}"></div>
+        <div class="pin-card-info">
           ${hasPin
-            ? `<div class="thread-pin-el">${elSummary}</div>`
-            : `<div class="thread-pin-el empty">Not pinned to an element</div>`}
+            ? `<div class="pin-card-el">${elSummary}</div>`
+            : `<div class="pin-card-el empty">Not pinned to an element</div>`}
           ${pageStr}
         </div>
         ${authed ? `
-          <button class="link-btn sm" data-action="pin-thread" ${pinning ? 'disabled' : ''}>${pinBtnLabel}</button>
-          ${hasPin ? `<button class="link-btn sm" data-action="unpin-thread" title="Remove this pin">Unpin</button>` : ''}
+          <div class="pin-card-actions">
+            <button class="link-btn" data-action="pin-thread" ${pinning ? 'disabled' : ''}>${pinBtnLabel}</button>
+            ${hasPin ? `<button class="link-btn" data-action="unpin-thread" title="Remove this pin">Unpin</button>` : ''}
+          </div>
         ` : ''}
       </div>
       <div class="thread-discussion">
@@ -3077,7 +3085,12 @@ function boot({ inIframe = false } = {}) {
       // Title: pinned element's text → element tag → first line of the message.
       const title = cap?.text?.slice(0, 60)
         || (cap ? `<${cap.tag}>` : (text.split('\n')[0].slice(0, 60) || 'Thread'));
-      const features = state.pendingFeatureTag ? [state.pendingFeatureTag] : [];
+      // Feature tag: user's explicit pick, falling back to the first feature
+      // so we never create an orphan thread. If somehow no features exist,
+      // the propose-submit button should already be disabled upstream.
+      const featureName = state.pendingFeatureTag || state.features[0]?.name;
+      if (!featureName) throw new Error('No feature available — create one first.');
+      const features = [featureName];
       const issue = await gh.createDiscussionThread(state.token, OWNER, REPONAME, { title, text, meta, features });
       state.threadsLoadedFor = '';       // force reload next time (general threads cache)
       state.viewingFeatureLoadedFor = ''; // force reload feature page threads too
@@ -3631,10 +3644,6 @@ function boot({ inIframe = false } = {}) {
       renderPanel();
     });
     on('[data-action="features-submit-create"]', 'click', submitCreateFeature);
-    on('[data-action="clear-feature-tag"]', 'click', () => {
-      state.pendingFeatureTag = null;
-      renderPanel();
-    });
     const featuresSearchInput = panelEl.querySelector('[data-field="features-search"]');
     featuresSearchInput?.addEventListener('input', (e) => {
       state.featuresSearch = e.target.value;
@@ -3711,6 +3720,10 @@ function boot({ inIframe = false } = {}) {
     });
     on('[data-action="pick"]', 'click', () => state.pickMode ? exitPickMode() : enterPickMode());
     on('[data-action="clear-capture"]', 'click', () => { state.capture = null; renderPanel(); });
+    const proposeFeatureSelect = panelEl.querySelector('[data-field="propose-feature"]');
+    proposeFeatureSelect?.addEventListener('change', (e) => {
+      state.pendingFeatureTag = e.target.value || null;
+    });
     on('[data-action="start-discussion"]', 'click', () => startDiscussion(false));
     on('[data-action="start-and-build"]', 'click', () => startDiscussion(true));
     on('[data-action="thread-build"]', 'click', buildFromThread);
