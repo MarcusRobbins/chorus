@@ -57,6 +57,14 @@ export const addIssueReaction = (token, owner, repo, number, content = '+1') =>
     body: JSON.stringify({ content }),
   });
 
+// Same, but on an individual comment (identified by its comment ID, not by
+// the issue number). Used for comment up/down-votes.
+export const addCommentReaction = (token, owner, repo, commentId, content = '+1') =>
+  gh(token, `/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  });
+
 // Fetch an issue by number (to get fresh reactions object after voting).
 export const getIssue = (token, owner, repo, number) =>
   gh(token, `/repos/${owner}/${repo}/issues/${number}`);

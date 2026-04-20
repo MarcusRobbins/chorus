@@ -881,30 +881,147 @@ const CSS_TEXT = `
     align-items: center;
   }
 
-  .thread-discussion {
-    display: flex; flex-direction: column; gap: 8px;
+  /* Reddit-style thread view — OP card on top, vote column down the left,
+     comments underneath with their own vote columns, reply composer at
+     the bottom. Designed to be instantly familiar to anyone who has ever
+     used reddit. */
+  .reddit-op {
+    display: flex; gap: 10px;
+    padding: 12px 14px;
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    margin-bottom: 10px;
   }
-  .thread-comment {
-    padding: 10px 12px; border-radius: var(--r-md);
-    background: var(--c-bg-subtle); border: 1px solid var(--c-border);
+  .op-main {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column; gap: 6px;
   }
-  .thread-comment.initial {
-    background: var(--c-bg); border-color: var(--c-border-strong);
-  }
-  .thread-comment-hdr {
+  .op-meta {
     display: flex; align-items: center; gap: 6px;
-    font-size: 11px; color: var(--c-text-muted);
-    margin-bottom: 5px;
+    font-size: 11.5px; color: var(--c-text-faint);
+    flex-wrap: wrap;
   }
-  .thread-comment-hdr img {
+  .op-feature {
+    color: var(--c-accent); font-weight: 600;
+    font-family: var(--font-mono); font-size: 11.5px;
+  }
+  .op-sep { opacity: 0.5; }
+  .op-author {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--c-text-muted); font-weight: 500;
+  }
+  .op-author img {
+    width: 14px; height: 14px; border-radius: 999px;
+    border: 1px solid var(--c-border);
+  }
+  .op-age { color: var(--c-text-faint); }
+  .op-resolved {
+    color: var(--c-text-faint); font-style: italic;
+  }
+  .op-title {
+    font-size: 15px; font-weight: 600; color: var(--c-text);
+    line-height: 1.3; margin: 2px 0 0;
+    letter-spacing: -0.01em;
+  }
+  .op-body {
+    font-size: 13px; color: var(--c-text);
+    line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .op-actions {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid var(--c-border);
+  }
+  .op-stat {
+    font-size: 11.5px; color: var(--c-text-muted);
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .op-stat.link { text-decoration: none; }
+  .op-stat.link:hover { color: var(--c-accent); }
+  .op-resolve { margin-left: auto; }
+
+  /* Compact pin-card when rendered inside the OP */
+  .pin-card.compact {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+  .pin-card.compact .pin-card-info {
+    font-size: 11px; line-height: 1.4;
+  }
+  .pin-card-page { color: var(--c-text-faint); font-family: var(--font-mono); }
+
+  /* Vote column: vertical stack of ▲ / score / ▼ */
+  .vote-col {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 2px; flex-shrink: 0; padding-top: 1px;
+  }
+  .vote-btn {
+    background: transparent; border: none; cursor: pointer;
+    width: 24px; height: 20px;
+    color: var(--c-text-faint);
+    font-size: 11px; line-height: 1;
+    border-radius: var(--r-xs);
+    transition: background var(--t-fast), color var(--t-fast);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vote-btn:hover:not(:disabled) { background: var(--c-bg-muted); }
+  .vote-btn.up:hover:not(:disabled) { color: #ef4444; }
+  .vote-btn.down:hover:not(:disabled) { color: #0ea5e9; }
+  .vote-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .vote-score {
+    font-size: 12px; font-weight: 600; color: var(--c-text);
+    min-width: 22px; text-align: center;
+  }
+
+  /* Comments header strip */
+  .comments-header {
+    display: flex; align-items: baseline; gap: 12px;
+    margin: 10px 0 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--c-border);
+  }
+  .comments-count {
+    font-size: 12.5px; font-weight: 600; color: var(--c-text);
+  }
+  .comments-sort strong { color: var(--c-text); font-weight: 600; }
+
+  /* Comments list */
+  .comments-section {
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .reddit-comment {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 8px 6px;
+    border-radius: var(--r-sm);
+    transition: background var(--t-fast);
+  }
+  .reddit-comment:hover { background: var(--c-bg-subtle); }
+  .comment-main {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .comment-hdr {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11.5px;
+  }
+  .comment-hdr img {
     width: 16px; height: 16px; border-radius: 999px;
     border: 1px solid var(--c-border);
   }
-  .thread-comment-hdr .name { font-weight: 500; color: var(--c-text); }
-  .thread-comment-hdr .age { color: var(--c-text-faint); }
-  .thread-comment-body {
+  .comment-hdr .name { font-weight: 600; color: var(--c-text); }
+  .comment-hdr .age { color: var(--c-text-faint); }
+  .comment-body {
     font-size: 12.5px; line-height: 1.55; color: var(--c-text);
     white-space: pre-wrap; word-break: break-word;
+  }
+
+  .reply-composer {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--c-border);
   }
 
   /* Features (subreddit-style topic scopes) */
@@ -2929,61 +3046,121 @@ function boot({ inIframe = false } = {}) {
   // ═══════════════════════════════════════════════════════════════
   function threadViewHtml() {
     if (state.currentThreadLoading && !state.currentThread) {
-      return `<div class="skeleton" style="height:80px;"></div><div class="skeleton" style="height:60px;"></div>`;
+      return `<div class="skeleton" style="height:120px;"></div><div class="skeleton" style="height:60px;"></div>`;
     }
     const t = state.currentThread;
     if (!t) return `<div class="muted">Thread not found.</div>`;
+    const issue = t.issue || {};
     const meta = t.meta || {};
     const hasPin = !!(meta.selector && meta.tag);
+    const authed = auth.isAuthed();
+
+    // OP meta: feature (primary if multiple), author, age
+    const featureLabels = (issue.labels || [])
+      .map((l) => (typeof l === 'string' ? l : l.name))
+      .filter((n) => typeof n === 'string' && n.startsWith('chorus:feature:'))
+      .map((n) => n.slice('chorus:feature:'.length));
+    const primaryFeature = featureLabels[0] || null;
+    const opAuthor = issue.user || {};
+    const opAge = relativeTimeStr(issue.created_at);
+
+    // Vote score on the OP from reactions
+    const opReactions = issue.reactions || {};
+    const opScore = (opReactions['+1'] || 0) - (opReactions['-1'] || 0);
+
+    // Pin summary / affordance
+    const pinning = state.pinningThreadNumber === issue.number;
+    const pinBtnLabel = pinning ? 'Picking…' : (hasPin ? 'Re-pin' : 'Pin element');
     const elSummary = hasPin
       ? `<${esc(meta.tag)}>${meta.text ? ` “${esc(meta.text.slice(0, 60))}${meta.text.length > 60 ? '…' : ''}”` : ''}`
       : '';
-    const pageStr = meta.page ? `<div class="muted-s">on <code>${esc(meta.page)}</code></div>` : '';
-    const authed = auth.isAuthed();
-    const pinning = state.pinningThreadNumber && state.pinningThreadNumber === t.issue?.number;
-    const pinBtnLabel = pinning ? 'Picking…' : (hasPin ? 'Re-pin' : 'Pin to element');
+    const pageStr = meta.page ? `on <code>${esc(meta.page)}</code>` : '';
+
     const comments = t.comments || [];
+    const commentCount = comments.length;
+    const issueOpen = issue.state === 'open';
+
     return `
-      <div class="pin-card ${hasPin ? '' : 'empty'}">
-        <div class="pin-card-dot ${hasPin ? 'filled' : ''}"></div>
-        <div class="pin-card-info">
-          ${hasPin
-            ? `<div class="pin-card-el">${elSummary}</div>`
-            : `<div class="pin-card-el empty">Not pinned to an element</div>`}
-          ${pageStr}
+      <article class="reddit-op">
+        <div class="vote-col">
+          <button class="vote-btn up" data-action="vote-op" data-dir="up" ${authed ? '' : 'disabled'} title="Upvote">▲</button>
+          <span class="vote-score">${opScore}</span>
+          <button class="vote-btn down" data-action="vote-op" data-dir="down" ${authed ? '' : 'disabled'} title="Downvote">▼</button>
         </div>
-        ${authed ? `
-          <div class="pin-card-actions">
-            <button class="link-btn" data-action="pin-thread" ${pinning ? 'disabled' : ''}>${pinBtnLabel}</button>
-            ${hasPin ? `<button class="link-btn" data-action="unpin-thread" title="Remove this pin">Unpin</button>` : ''}
+        <div class="op-main">
+          <div class="op-meta">
+            ${primaryFeature ? `<span class="op-feature">r/${esc(primaryFeature)}</span><span class="op-sep">·</span>` : ''}
+            <span class="op-author">${opAuthor.avatar_url ? `<img src="${esc(opAuthor.avatar_url)}" alt="" />` : ''}${esc(opAuthor.login || 'someone')}</span>
+            <span class="op-sep">·</span>
+            <span class="op-age">${esc(opAge)}</span>
+            ${!issueOpen ? `<span class="op-sep">·</span><span class="op-resolved">resolved</span>` : ''}
           </div>
-        ` : ''}
+          ${issue.title ? `<h2 class="op-title">${esc(issue.title)}</h2>` : ''}
+          ${t.initialText ? `<div class="op-body">${esc(t.initialText)}</div>` : ''}
+          <div class="pin-card compact ${hasPin ? '' : 'empty'}">
+            <div class="pin-card-dot ${hasPin ? 'filled' : ''}"></div>
+            <div class="pin-card-info">
+              ${hasPin ? elSummary : 'Not pinned'}${pageStr ? `<span class="pin-card-page"> · ${pageStr}</span>` : ''}
+            </div>
+            ${authed ? `
+              <div class="pin-card-actions">
+                <button class="link-btn" data-action="pin-thread" ${pinning ? 'disabled' : ''}>${pinBtnLabel}</button>
+                ${hasPin ? `<button class="link-btn" data-action="unpin-thread" title="Remove this pin">Unpin</button>` : ''}
+              </div>
+            ` : ''}
+          </div>
+          <div class="op-actions">
+            <span class="op-stat">💬 ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}</span>
+            ${issue.html_url ? `<a class="op-stat link" href="${esc(issue.html_url)}" target="_blank" rel="noopener">↗ open on GitHub</a>` : ''}
+            ${authed && issueOpen ? `<button class="link-btn op-resolve" data-action="close-thread" title="Mark this thread resolved">Resolve</button>` : ''}
+          </div>
+        </div>
+      </article>
+
+      <div class="comments-header">
+        <span class="comments-count">${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}</span>
+        <span class="comments-sort muted-s">sorted by <strong>new</strong></span>
       </div>
-      <div class="thread-discussion">
-        ${threadComment({ author: t.issue?.user, body: t.initialText, created_at: t.issue?.created_at }, true)}
-        ${comments.map((c) => threadComment(c, false)).join('')}
+
+      <div class="comments-section">
+        ${comments.length === 0
+          ? `<div class="muted-s" style="padding:8px 4px">No comments yet. Be the first.</div>`
+          : comments.map(redditComment).join('')}
       </div>
-      <label class="field">
-        Reply
-        <textarea data-field="thread-reply" placeholder="Reply to discuss — or describe a change and click 🤖 Build with AI to spin up a branch.">${esc(state.threadComposeDraft || '')}</textarea>
-      </label>
+
+      ${issueOpen ? `
+        <label class="field reply-composer">
+          Add a comment
+          <textarea data-field="thread-reply" placeholder="Reply to discuss — or describe a change and click 🤖 Build with AI to spin up a branch.">${esc(state.threadComposeDraft || '')}</textarea>
+        </label>
+      ` : ''}
     `;
   }
 
-  function threadComment(c, isInitial) {
-    const author = c.author || c.user || {};
+  function redditComment(c) {
+    const author = c.user || c.author || {};
     const body = c.body || '';
     const avatar = author.avatar_url ? `<img src="${esc(author.avatar_url)}" alt="" />` : '';
     const login = author.login || 'someone';
     const age = relativeTimeStr(c.created_at);
+    const reactions = c.reactions || {};
+    const score = (reactions['+1'] || 0) - (reactions['-1'] || 0);
+    const authed = auth.isAuthed();
     return `
-      <div class="thread-comment ${isInitial ? 'initial' : ''}">
-        <div class="thread-comment-hdr">
-          ${avatar}
-          <span class="name">${esc(login)}</span>
-          <span class="age">${esc(age)}</span>
+      <div class="reddit-comment" data-comment-id="${c.id}">
+        <div class="vote-col">
+          <button class="vote-btn up" data-action="vote-comment" data-comment-id="${c.id}" data-dir="up" ${authed ? '' : 'disabled'} title="Upvote">▲</button>
+          <span class="vote-score">${score}</span>
+          <button class="vote-btn down" data-action="vote-comment" data-comment-id="${c.id}" data-dir="down" ${authed ? '' : 'disabled'} title="Downvote">▼</button>
         </div>
-        <div class="thread-comment-body">${esc(body)}</div>
+        <div class="comment-main">
+          <div class="comment-hdr">
+            ${avatar}
+            <span class="name">${esc(login)}</span>
+            <span class="age">${esc(age)}</span>
+          </div>
+          <div class="comment-body">${esc(body)}</div>
+        </div>
       </div>
     `;
   }
@@ -2997,8 +3174,7 @@ function boot({ inIframe = false } = {}) {
     }
     return `
       <div class="secondary">
-        <button data-action="close-thread" title="Mark this thread resolved">Resolve</button>
-        <button data-action="post-thread-reply" ${hasDraft ? '' : 'disabled'}>Reply</button>
+        <button data-action="post-thread-reply" ${hasDraft ? '' : 'disabled'}>Comment</button>
       </div>
       <button class="primary" data-action="thread-build" ${hasDraft ? '' : 'disabled'} title="Spin up a branch: run AI with this message as the prompt">🤖 Build with AI</button>
     `;
@@ -3273,6 +3449,49 @@ function boot({ inIframe = false } = {}) {
       beginFirstAiTurn();
     } catch (err) {
       console.warn('[chorus] promote failed', err);
+    }
+  }
+
+  // Upvote / downvote the thread's OP (the issue itself). Optimistic:
+  // bumps the local reaction count, then POSTs. On failure, rolls back.
+  // GitHub's reactions API has no simple "remove my previous reaction"
+  // path (you'd have to list then DELETE by id), so we don't try to
+  // toggle — repeated clicks add more reactions up to what the API
+  // allows, and the server dedupes when the same user casts the same
+  // reaction twice.
+  async function voteOnThreadOP(dir) {
+    if (!requireAuth('threadView')) return;
+    const t = state.currentThread;
+    if (!t?.issue) return;
+    const content = dir === 'up' ? '+1' : '-1';
+    const r = (t.issue.reactions = t.issue.reactions || {});
+    r[content] = (r[content] || 0) + 1;
+    renderPanel();
+    try {
+      await gh.addIssueReaction(state.token, OWNER, REPONAME, t.issue.number, content);
+    } catch (err) {
+      r[content] = Math.max(0, (r[content] || 0) - 1);
+      console.warn('[chorus] vote OP failed', err);
+      renderPanel();
+    }
+  }
+
+  async function voteOnThreadComment(commentId, dir) {
+    if (!requireAuth('threadView')) return;
+    const t = state.currentThread;
+    if (!t?.comments) return;
+    const c = t.comments.find((cc) => String(cc.id) === String(commentId));
+    if (!c) return;
+    const content = dir === 'up' ? '+1' : '-1';
+    const r = (c.reactions = c.reactions || {});
+    r[content] = (r[content] || 0) + 1;
+    renderPanel();
+    try {
+      await gh.addCommentReaction(state.token, OWNER, REPONAME, commentId, content);
+    } catch (err) {
+      r[content] = Math.max(0, (r[content] || 0) - 1);
+      console.warn('[chorus] vote comment failed', err);
+      renderPanel();
     }
   }
 
@@ -3781,6 +4000,15 @@ function boot({ inIframe = false } = {}) {
       enterPickMode();
     });
     on('[data-action="unpin-thread"]', 'click', unpinThread);
+
+    // Thread OP vote arrows
+    panelEl.querySelectorAll('[data-action="vote-op"]').forEach((el) => {
+      el.addEventListener('click', () => voteOnThreadOP(el.dataset.dir));
+    });
+    // Comment vote arrows
+    panelEl.querySelectorAll('[data-action="vote-comment"]').forEach((el) => {
+      el.addEventListener('click', () => voteOnThreadComment(el.dataset.commentId, el.dataset.dir));
+    });
 
     // Feature
     on('[data-action="refine"]', 'click', () => {
