@@ -1024,6 +1024,44 @@ const CSS_TEXT = `
     border-top: 1px solid var(--c-border);
   }
 
+  /* Per-comment action row + pin/branch badges */
+  .comment-actions {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 2px;
+    flex-wrap: wrap;
+  }
+  .comment-actions .link-btn {
+    font-size: 11px; padding: 2px 6px;
+  }
+  .comment-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--c-text-muted);
+    padding: 3px 7px; border-radius: 999px;
+    align-self: flex-start;
+    margin-top: 2px;
+    border: 1px solid var(--c-border);
+  }
+  .comment-badge.pin {
+    background: var(--c-accent-bg);
+    border-color: color-mix(in srgb, var(--c-accent) 20%, transparent);
+    color: var(--c-accent-fg);
+    font-family: var(--font-mono);
+    word-break: break-all;
+  }
+  .comment-badge.pin .pin-card-dot {
+    width: 8px; height: 8px; margin-top: 0;
+  }
+  .comment-badge.branch {
+    background: var(--c-bg-muted);
+  }
+  .comment-badge.branch .link-btn {
+    padding: 0; font-size: 11px;
+  }
+  .comment-badge.branch code {
+    font-family: var(--font-mono); background: transparent; padding: 0;
+    color: var(--c-text); font-size: 11px;
+  }
+
   /* Features (subreddit-style topic scopes) */
   .features-toolbar {
     display: flex; gap: 8px; margin: 4px 0 12px;
@@ -1759,6 +1797,10 @@ function boot({ inIframe = false } = {}) {
     // When the user hits "Pin to element" on the thread view, the next pick
     // updates that thread's meta instead of filling state.capture.
     pinningThreadNumber: null,          // number | null
+
+    // Same idea at the comment level: when the user hits "Pin element" on
+    // a specific comment, the next pick routes into that comment's meta.
+    pinningCommentId: null,             // number | null
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -3139,13 +3181,26 @@ function boot({ inIframe = false } = {}) {
 
   function redditComment(c) {
     const author = c.user || c.author || {};
-    const body = c.body || '';
+    const cmeta = gh.parseCommentMeta(c.body || '') || {};
+    const cleanBody = gh.stripCommentMeta(c.body || '');
     const avatar = author.avatar_url ? `<img src="${esc(author.avatar_url)}" alt="" />` : '';
     const login = author.login || 'someone';
     const age = relativeTimeStr(c.created_at);
     const reactions = c.reactions || {};
     const score = (reactions['+1'] || 0) - (reactions['-1'] || 0);
     const authed = auth.isAuthed();
+
+    const pin = cmeta.pin || null;
+    const hasPin = !!(pin?.selector && pin?.tag);
+    const branchRef = cmeta.branch || null;
+
+    const pinning = state.pinningCommentId != null && String(state.pinningCommentId) === String(c.id);
+    const buildingFromThis = state.ai?.sourceCommentId != null
+      && String(state.ai.sourceCommentId) === String(c.id)
+      && (state.ai.status === 'running' || state.ai.status === 'committing');
+    const pinLabel = pinning ? 'Picking…' : (hasPin ? 'Re-pin' : 'Pin element');
+    const buildLabel = buildingFromThis ? 'Building…' : '🤖 Build with AI';
+
     return `
       <div class="reddit-comment" data-comment-id="${c.id}">
         <div class="vote-col">
@@ -3159,7 +3214,28 @@ function boot({ inIframe = false } = {}) {
             <span class="name">${esc(login)}</span>
             <span class="age">${esc(age)}</span>
           </div>
-          <div class="comment-body">${esc(body)}</div>
+          ${cleanBody ? `<div class="comment-body">${esc(cleanBody)}</div>` : ''}
+          ${hasPin ? `
+            <div class="comment-badge pin">
+              <span class="pin-card-dot filled"></span>
+              <span><${esc(pin.tag)}>${pin.text ? ` “${esc(pin.text.slice(0, 40))}${pin.text.length > 40 ? '…' : ''}”` : ''}</span>
+            </div>
+          ` : ''}
+          ${branchRef ? `
+            <div class="comment-badge branch">
+              <span>🌿</span>
+              <button class="link-btn" data-action="comment-branch" data-branch="${esc(branchRef)}" title="Open this branch">
+                <code>${esc(branchRef)}</code>
+              </button>
+            </div>
+          ` : ''}
+          ${authed ? `
+            <div class="comment-actions">
+              <button class="link-btn" data-action="pin-comment" data-comment-id="${c.id}" ${pinning ? 'disabled' : ''}>${pinLabel}</button>
+              ${hasPin ? `<button class="link-btn" data-action="unpin-comment" data-comment-id="${c.id}">Unpin</button>` : ''}
+              <button class="link-btn" data-action="build-from-comment" data-comment-id="${c.id}" ${buildingFromThis ? 'disabled' : ''}>${buildLabel}</button>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
@@ -3406,6 +3482,109 @@ function boot({ inIframe = false } = {}) {
     } finally {
       renderPanel();
     }
+  }
+
+  // Apply a freshly-picked capture as the pin on a specific comment.
+  // Preserves any other meta (e.g. branch attachment) on that comment.
+  async function applyCommentPin(commentId, capture) {
+    if (!requireAuth('threadView')) return;
+    const t = state.currentThread;
+    const c = t?.comments?.find((cc) => String(cc.id) === String(commentId));
+    if (!c) return;
+    const prevMeta = gh.parseCommentMeta(c.body || '') || {};
+    const cleanText = gh.stripCommentMeta(c.body || '');
+    const meta = {
+      ...prevMeta,
+      pin: {
+        selector: capture.selector,
+        text: capture.text,
+        tag: capture.tag,
+        bbox: capture.rect,
+      },
+    };
+    try {
+      const updated = await gh.updateCommentMeta(state.token, OWNER, REPONAME, commentId, { meta, text: cleanText });
+      c.body = updated.body;
+    } catch (err) {
+      console.warn('[chorus] applyCommentPin', err);
+    } finally {
+      renderPanel();
+    }
+  }
+
+  // Strip the pin from a comment while preserving other meta + text.
+  async function unpinComment(commentId) {
+    if (!requireAuth('threadView')) return;
+    const t = state.currentThread;
+    const c = t?.comments?.find((cc) => String(cc.id) === String(commentId));
+    if (!c) return;
+    const prevMeta = gh.parseCommentMeta(c.body || '') || {};
+    const cleanText = gh.stripCommentMeta(c.body || '');
+    const { pin, ...rest } = prevMeta;
+    try {
+      const updated = await gh.updateCommentMeta(state.token, OWNER, REPONAME, commentId, { meta: rest, text: cleanText });
+      c.body = updated.body;
+    } catch (err) {
+      console.warn('[chorus] unpinComment', err);
+    } finally {
+      renderPanel();
+    }
+  }
+
+  // After an AI session finishes committing on behalf of a source comment,
+  // write the resulting branch name back into that comment's meta. This is
+  // what makes the "🌿 branch: xyz" badge appear under the comment.
+  async function attachBranchToComment(commentId, branch) {
+    if (!commentId || !branch) return;
+    const t = state.currentThread;
+    // The thread may not be the active screen anymore, but we still want
+    // to persist the attachment — load the comment directly if needed.
+    let c = t?.comments?.find((cc) => String(cc.id) === String(commentId));
+    if (!c) return; // we only persist this when we can read the existing body
+    const prevMeta = gh.parseCommentMeta(c.body || '') || {};
+    const cleanText = gh.stripCommentMeta(c.body || '');
+    const meta = { ...prevMeta, branch };
+    try {
+      const updated = await gh.updateCommentMeta(state.token, OWNER, REPONAME, commentId, { meta, text: cleanText });
+      c.body = updated.body;
+    } catch (err) {
+      console.warn('[chorus] attachBranchToComment', err);
+    }
+  }
+
+  // Kick off an AI session with a specific comment as the source prompt.
+  // Uses the comment's clean body as the AI instruction, carries through
+  // any element pin on the comment, and tags the resulting branch back
+  // onto the originating comment when it lands.
+  async function buildFromComment(commentId) {
+    if (!requireAuth('threadView')) return;
+    if (!state.openaiKey) {
+      state.pendingIntent = 'build-from-comment';
+      state._pendingBuildFromCommentId = commentId;
+      navigate('keyPrompt');
+      return;
+    }
+    const t = state.currentThread;
+    const c = t?.comments?.find((cc) => String(cc.id) === String(commentId));
+    if (!c?.body && !gh.stripCommentMeta(c?.body || '')) return;
+    const cmeta = gh.parseCommentMeta(c.body || '') || {};
+    const promptText = gh.stripCommentMeta(c.body || '').trim();
+    if (!promptText) return;
+    const capture = cmeta.pin ? {
+      tag: cmeta.pin.tag,
+      selector: cmeta.pin.selector,
+      text: cmeta.pin.text,
+      rect: cmeta.pin.bbox || { x: 0, y: 0, w: 0, h: 0 },
+      url: location.href,
+    } : null;
+    // Track the source comment so commitAndSurface can write the branch
+    // reference back onto it once the build completes.
+    state._pendingSourceCommentId = commentId;
+    await kickOffAiForThread({
+      issue: { number: t.issue.number, html_url: t.issue.html_url },
+      promptText,
+      capture,
+    });
   }
 
   async function postThreadReply() {
@@ -4009,6 +4188,28 @@ function boot({ inIframe = false } = {}) {
     panelEl.querySelectorAll('[data-action="vote-comment"]').forEach((el) => {
       el.addEventListener('click', () => voteOnThreadComment(el.dataset.commentId, el.dataset.dir));
     });
+    // Per-comment actions: pin / unpin / build-from-comment / open branch
+    panelEl.querySelectorAll('[data-action="pin-comment"]').forEach((el) => {
+      el.addEventListener('click', () => {
+        if (!requireAuth('threadView')) return;
+        state.pinningCommentId = el.dataset.commentId;
+        renderPanel();       // so the button shows "Picking…"
+        enterPickMode();
+      });
+    });
+    panelEl.querySelectorAll('[data-action="unpin-comment"]').forEach((el) => {
+      el.addEventListener('click', () => unpinComment(el.dataset.commentId));
+    });
+    panelEl.querySelectorAll('[data-action="build-from-comment"]').forEach((el) => {
+      el.addEventListener('click', () => buildFromComment(el.dataset.commentId));
+    });
+    panelEl.querySelectorAll('[data-action="comment-branch"]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const name = el.dataset.branch;
+        if (!name) return;
+        selectBranch(name);
+      });
+    });
 
     // Feature
     on('[data-action="refine"]', 'click', () => {
@@ -4102,6 +4303,11 @@ function boot({ inIframe = false } = {}) {
       else if (intent === 'build') beginFirstAiTurn();
       else if (intent === 'start-and-build') startDiscussion(true);
       else if (intent === 'thread-build') buildFromThread();
+      else if (intent === 'build-from-comment') {
+        const id = state._pendingBuildFromCommentId;
+        state._pendingBuildFromCommentId = null;
+        if (id) buildFromComment(id);
+      }
       else navigate('features', { reset: true });
     });
 
@@ -4220,10 +4426,11 @@ function boot({ inIframe = false } = {}) {
       rect: { x: r.left, y: r.top, w: r.width, h: r.height },
       url: location.href,
     };
-    // If the pick was initiated from the thread view's "Pin to element"
-    // affordance, route the capture straight to updating that thread's meta
-    // rather than populating state.capture (which drives the propose flow).
+    // If the pick was initiated from one of the retroactive-pin paths,
+    // route the capture to the right handler instead of populating
+    // state.capture (which drives the propose flow).
     const pinningNumber = state.pinningThreadNumber;
+    const pinningCmtId = state.pinningCommentId;
     state.pickMode = false;
     overlayEl?.remove(); overlayEl = null;
     hintEl?.remove(); hintEl = null;
@@ -4234,6 +4441,10 @@ function boot({ inIframe = false } = {}) {
       state.pinningThreadNumber = null;
       openPanel();            // re-open the panel on threadView
       applyThreadPin(pinningNumber, capture).catch(() => {});
+    } else if (pinningCmtId) {
+      state.pinningCommentId = null;
+      openPanel();
+      applyCommentPin(pinningCmtId, capture).catch(() => {});
     } else {
       state.capture = capture;
       openPanel();
@@ -4396,7 +4607,9 @@ function boot({ inIframe = false } = {}) {
 
   async function beginFirstAiTurn() {
     const issue = state._pendingIssue;
+    const sourceCommentId = state._pendingSourceCommentId;
     state._pendingIssue = null;
+    state._pendingSourceCommentId = null;
     if (!issue) return;
     const slug = slugify(state.name || '') || `issue-${issue.number}`;
 
@@ -4419,6 +4632,10 @@ function boot({ inIframe = false } = {}) {
       // Per-session model. Defaults to the user's configured default;
       // the AI screen has a dropdown that mutates it for this session only.
       model: state.openaiModel || DEFAULT_MODEL,
+      // If this session was kicked off from a specific comment's
+      // "Build with AI" button, carry the comment id through so the
+      // resulting branch gets attached back to that comment.
+      sourceCommentId,
     };
     navigate('ai', { reset: true });
 
@@ -4595,6 +4812,13 @@ function boot({ inIframe = false } = {}) {
     state.ai.previewUrl = previewUrl;
     state.ai.summary = result.summary;
     state.ai.status = 'done';
+
+    // If this run was kicked off from a specific comment, attach the
+    // resulting branch to that comment's meta so the badge appears under
+    // it when the user returns to the thread.
+    if (state.ai.sourceCommentId) {
+      await safe(() => attachBranchToComment(state.ai.sourceCommentId, branch));
+    }
 
     // Always show/refresh preview with the SHA-pinned URL. rawcdn is
     // immutable so there's no cache to bust — but we still call show

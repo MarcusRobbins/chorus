@@ -218,6 +218,53 @@ export async function updateThreadMeta(token, owner, repo, number, { meta, text 
   });
 }
 
+// --- per-comment metadata (pin / branch attachments on replies) ---------
+//
+// Individual comments can carry their own meta block: a pinned element, a
+// branch reference (when the AI has been asked to "build this comment"),
+// or both. Same encoding scheme as thread meta — an HTML-comment block at
+// the top of the comment body, invisible on github.com, machine-readable
+// by chorus.
+const COMMENT_META_OPEN = '<!-- chorus-comment-meta';
+const COMMENT_META_CLOSE = '-->';
+
+export function buildCommentBody({ meta, text }) {
+  const hasMeta = meta && typeof meta === 'object' && Object.keys(meta).length > 0;
+  const cleanText = (text || '').trim();
+  if (!hasMeta) return cleanText;
+  const metaBlob = JSON.stringify(meta);
+  return `${COMMENT_META_OPEN}\n${metaBlob}\n${COMMENT_META_CLOSE}\n\n${cleanText}`.trim();
+}
+
+export function parseCommentMeta(body) {
+  if (!body) return null;
+  const open = body.indexOf(COMMENT_META_OPEN);
+  if (open < 0) return null;
+  const close = body.indexOf(COMMENT_META_CLOSE, open);
+  if (close < 0) return null;
+  const raw = body.slice(open + COMMENT_META_OPEN.length, close).trim();
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+export function stripCommentMeta(body) {
+  if (!body) return '';
+  const open = body.indexOf(COMMENT_META_OPEN);
+  if (open < 0) return body;
+  const close = body.indexOf(COMMENT_META_CLOSE, open);
+  if (close < 0) return body;
+  return (body.slice(0, open) + body.slice(close + COMMENT_META_CLOSE.length)).trim();
+}
+
+// Rewrite an individual comment's body with new meta (and the same or
+// rewritten text). Returns the updated comment object.
+export async function updateCommentMeta(token, owner, repo, commentId, { meta, text }) {
+  const body = buildCommentBody({ meta, text });
+  return gh(token, `/repos/${owner}/${repo}/issues/comments/${commentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ body }),
+  });
+}
+
 // Remove the thread label so the issue becomes a regular ticket.
 // GitHub's label-removal endpoint is label-specific; we use it to avoid
 // clobbering any other labels on the issue.
