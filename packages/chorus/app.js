@@ -875,6 +875,106 @@ const CSS_TEXT = `
     white-space: pre-wrap; word-break: break-word;
   }
 
+  /* Features (subreddit-style topic scopes) */
+  .features-toolbar {
+    display: flex; gap: 8px; margin: 4px 0 12px;
+  }
+  .features-search {
+    flex: 1 1 auto;
+    font: inherit; font-size: 12.5px;
+    padding: 8px 12px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-sm);
+    background: var(--c-bg);
+    color: var(--c-text);
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  }
+  .features-search:focus {
+    outline: none;
+    border-color: var(--c-accent);
+    box-shadow: 0 0 0 3px var(--c-accent-bg);
+  }
+  .features-search::placeholder { color: var(--c-text-faint); }
+  .features-search:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+  }
+  .feature-card {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-bg);
+    cursor: pointer;
+    text-align: left;
+    font: inherit; color: inherit;
+    transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast), background var(--t-fast);
+  }
+  .feature-card:hover {
+    border-color: var(--c-accent);
+    background: var(--c-bg-subtle);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+  }
+  .feature-card:active { transform: translateY(0); }
+  .feature-card-head {
+    display: flex; align-items: center; gap: 8px;
+    min-width: 0;
+  }
+  .feature-swatch {
+    flex: 0 0 auto;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15);
+  }
+  .feature-name {
+    font-family: var(--font-mono);
+    font-size: 12.5px; font-weight: 600;
+    color: var(--c-text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .feature-card-desc {
+    font-size: 11.5px; color: var(--c-text-muted);
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 32px;
+  }
+
+  /* Create form (inline on the features screen) */
+  .features-create {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px 14px 12px;
+    border: 1px solid var(--c-accent-border, var(--c-border));
+    border-radius: var(--r-md);
+    background: var(--c-bg-subtle);
+    margin-bottom: 12px;
+    box-shadow: var(--shadow-sm);
+  }
+  .features-create-head {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .features-create-title {
+    font-size: 12.5px; font-weight: 600; color: var(--c-text);
+    letter-spacing: -0.01em;
+  }
+  .features-create-close {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--c-text-faint); font: inherit; font-size: 14px;
+    padding: 2px 6px; border-radius: var(--r-xs);
+    transition: background var(--t-fast), color var(--t-fast);
+  }
+  .features-create-close:hover { background: var(--c-bg-muted); color: var(--c-text); }
+  .features-create-actions {
+    display: flex; gap: 8px; justify-content: flex-end;
+    margin-top: 2px;
+  }
+
   /* Empty state card */
   .empty-state {
     padding: 20px 18px; text-align: left;
@@ -1389,7 +1489,7 @@ function boot({ inIframe = false } = {}) {
     open: false,
 
     // Navigation
-    screen: 'browse',       // browse | propose | feature | ai | threadList | threadView | signIn | devicePending | keyPrompt | settings
+    screen: 'browse',       // browse | features | propose | feature | ai | threadList | threadView | signIn | devicePending | keyPrompt | settings
     backStack: [],          // array of { screen, ctx }
     pendingIntent: null,    // { afterSignIn: 'navigateToX' } for interstitials
 
@@ -1455,6 +1555,17 @@ function boot({ inIframe = false } = {}) {
     // View mode — 'tree' (phylogeny) is the new default; 'list' is the
     // fallback in case the tree experiment doesn't land well.
     viewMode: savedViewMode === 'list' ? 'list' : 'tree',
+
+    // Features (subreddit-style topic scopes)
+    features: [],              // [{ name, rawName, description, color }]
+    featuresLoading: false,
+    featuresError: null,
+    featuresLoaded: false,     // true once loadFeatures has succeeded at least once
+    featuresSearch: '',
+    featuresCreateOpen: false,
+    featuresCreateDraft: { name: '', description: '' },
+    featuresCreating: false,
+    featuresCreateError: null,
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -1989,6 +2100,12 @@ function boot({ inIframe = false } = {}) {
     const authed = auth.isAuthed();
     return `
       <div class="menu">
+        <div class="menu-section-label">Browse</div>
+        <button class="menu-item" data-action="goto-features-menu">
+          <span class="menu-check"></span>
+          <span>Features</span>
+        </button>
+        <div class="menu-divider"></div>
         <div class="menu-section-label">View</div>
         <button class="menu-item ${state.viewMode === 'tree' ? 'checked' : ''}" data-action="set-view-tree">
           <span class="menu-check">${state.viewMode === 'tree' ? '✓' : ''}</span>
@@ -2026,6 +2143,7 @@ function boot({ inIframe = false } = {}) {
     if (!configOK()) return 'Chorus';
     switch (state.screen) {
       case 'browse':        return `${esc(REPO)}`;
+      case 'features':      return 'Features';
       case 'propose':       return 'Start a thread';
       case 'feature':       return `<code>${esc(state.featureBranch || '…')}</code>`;
       case 'ai':            return state.ai?.status === 'running'
@@ -2051,6 +2169,7 @@ function boot({ inIframe = false } = {}) {
       if (!configOK()) return configMissingHtml();
       switch (state.screen) {
         case 'browse':        return browseHtml();
+        case 'features':      return featuresHtml();
         case 'propose':       return proposeHtml();
         case 'feature':       return featureHtml();
         case 'ai':            return aiHtml();
@@ -2072,6 +2191,7 @@ function boot({ inIframe = false } = {}) {
     let html = '';
     switch (state.screen) {
       case 'browse':        html = browseActions(); break;
+      case 'features':      html = featuresActions(); break;
       case 'propose':       html = proposeActions(); break;
       case 'feature':       html = featureActions(); break;
       case 'ai':            html = aiActions(); break;
@@ -2137,6 +2257,14 @@ function boot({ inIframe = false } = {}) {
       ${state.branchesLoading && !state.branches.length ? `
         <div class="skeleton" style="height:80px;"></div>
       ` : ''}
+      <button class="nav-card" data-action="goto-features">
+        <div class="nav-card-mark"></div>
+        <div>
+          <div class="nav-card-title">Features</div>
+          <div class="muted-s">Topic scopes — like subreddits — that group threads and branches</div>
+        </div>
+        <div class="nav-card-chev">→</div>
+      </button>
       <button class="nav-card" data-action="goto-threads">
         <div class="nav-card-mark"></div>
         <div>
@@ -2369,6 +2497,185 @@ function boot({ inIframe = false } = {}) {
       </div>
       ${!isMain ? `<button class="primary" data-action="refine" ${authed ? '' : 'disabled title="Sign in to refine"'}>🤖 Refine with AI</button>` : ''}
     `;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SCREEN: Features (subreddit-style topic scopes)
+  // ═══════════════════════════════════════════════════════════════
+  function featuresHtml() {
+    const q = (state.featuresSearch || '').trim().toLowerCase();
+    const filtered = q
+      ? state.features.filter((f) =>
+          f.name.toLowerCase().includes(q) || (f.description || '').toLowerCase().includes(q))
+      : state.features;
+    const loading = state.featuresLoading && !state.features.length;
+    const hasFeatures = state.features.length > 0;
+    const noMatch = hasFeatures && filtered.length === 0;
+    const emptyAll = !loading && !hasFeatures && !state.featuresError;
+
+    return `
+      <p class="muted">Features are topic scopes — like subreddits — that group threads, branches and proposals. An item can belong to many features.</p>
+
+      ${state.featuresError ? `<div class="err">${esc(state.featuresError)}</div>` : ''}
+
+      <div class="features-toolbar">
+        <input
+          class="features-search"
+          type="search"
+          placeholder="Search features…"
+          data-field="features-search"
+          value="${esc(state.featuresSearch)}"
+          ${hasFeatures ? '' : 'disabled'}
+        />
+      </div>
+
+      ${state.featuresCreateOpen ? featuresCreateFormHtml() : ''}
+
+      ${loading ? `
+        <div class="features-grid">
+          <div class="skeleton" style="height:88px;"></div>
+          <div class="skeleton" style="height:88px;"></div>
+          <div class="skeleton" style="height:88px;"></div>
+          <div class="skeleton" style="height:88px;"></div>
+        </div>
+      ` : ''}
+
+      ${emptyAll ? `
+        <div class="empty-state">
+          <div class="empty-state-title">No features yet</div>
+          <div class="muted-s">Create one to group related threads, branches and proposals. Examples: <code>auth</code>, <code>pricing</code>, <code>onboarding</code>.</div>
+        </div>
+      ` : ''}
+
+      ${noMatch ? `
+        <div class="empty-state">
+          <div class="empty-state-title">No features match “${esc(state.featuresSearch)}”</div>
+          <div class="muted-s">Adjust your search, or create a new feature.</div>
+        </div>
+      ` : ''}
+
+      ${!loading && filtered.length ? `
+        <div class="features-grid">
+          ${filtered.map(featureCardHtml).join('')}
+        </div>
+      ` : ''}
+    `;
+  }
+
+  function featureCardHtml(f) {
+    const color = (f.color || '64748b').replace(/^#/, '');
+    const desc = f.description ? esc(f.description) : '<span class="muted-s">No description.</span>';
+    return `
+      <button class="feature-card" data-action="open-feature" data-feature="${esc(f.name)}" title="Open feature ${esc(f.name)}">
+        <div class="feature-card-head">
+          <span class="feature-swatch" style="background:#${esc(color)}"></span>
+          <span class="feature-name">${esc(f.name)}</span>
+        </div>
+        <div class="feature-card-desc">${desc}</div>
+      </button>
+    `;
+  }
+
+  function featuresCreateFormHtml() {
+    const { name, description } = state.featuresCreateDraft;
+    const slug = name ? slugifyFeatureNameClient(name) : '';
+    const canCreate = !!slug && !state.featuresCreating;
+    return `
+      <div class="features-create">
+        <div class="features-create-head">
+          <div class="features-create-title">New feature</div>
+          <button class="features-create-close" data-action="features-cancel-create" title="Cancel">✕</button>
+        </div>
+        <label class="field">
+          Name
+          <input type="text" data-field="features-create-name" value="${esc(name)}" placeholder="e.g. auth" maxlength="48" />
+          ${slug && slug !== name ? `<div class="muted-s">Will be saved as <code>${esc(slug)}</code></div>` : ''}
+        </label>
+        <label class="field">
+          Description <span class="muted-s">(optional)</span>
+          <textarea data-field="features-create-description" placeholder="What belongs in this feature?">${esc(description)}</textarea>
+        </label>
+        ${state.featuresCreateError ? `<div class="err">${esc(state.featuresCreateError)}</div>` : ''}
+        <div class="features-create-actions">
+          <button data-action="features-cancel-create">Cancel</button>
+          <button class="primary" data-action="features-submit-create" ${canCreate ? '' : 'disabled'}>
+            ${state.featuresCreating ? 'Creating…' : 'Create feature'}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function featuresActions() {
+    const authed = auth.isAuthed();
+    return `
+      <div class="secondary">
+        <button data-action="features-refresh">Refresh</button>
+      </div>
+      <button class="primary" data-action="features-open-create" ${authed ? '' : 'disabled title="Sign in to create features"'}>
+        + New feature
+      </button>
+    `;
+  }
+
+  // Client-side copy of gh-client's slugifyFeatureName so we can show the
+  // resolved slug in the create form without reaching for the network.
+  function slugifyFeatureNameClient(name) {
+    return String(name || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48);
+  }
+
+  async function loadFeatures({ force = false } = {}) {
+    if (!force && state.featuresLoaded && state.features.length) return;
+    state.featuresLoading = true;
+    state.featuresError = null;
+    renderPanel();
+    try {
+      state.features = await gh.listFeatures(state.token, OWNER, REPONAME);
+      state.featuresLoaded = true;
+    } catch (err) {
+      state.featuresError = String(err?.message || err);
+    } finally {
+      state.featuresLoading = false;
+      renderPanel();
+    }
+  }
+
+  async function submitCreateFeature() {
+    if (!requireAuth('features')) return;
+    if (state.featuresCreating) return;
+    const { name, description } = state.featuresCreateDraft;
+    const slug = slugifyFeatureNameClient(name);
+    if (!slug) return;
+    state.featuresCreating = true;
+    state.featuresCreateError = null;
+    renderPanel();
+    try {
+      const created = await gh.createFeature(state.token, OWNER, REPONAME, {
+        name: slug,
+        description: (description || '').trim(),
+      });
+      // Merge into the list without a full reload. Dedupe in case GH raced.
+      const exists = state.features.some((f) => f.name === created.name);
+      if (!exists) state.features = [...state.features, created].sort((a, b) => a.name.localeCompare(b.name));
+      state.featuresCreateOpen = false;
+      state.featuresCreateDraft = { name: '', description: '' };
+    } catch (err) {
+      // GH returns 422 on duplicate label — surface a friendly message.
+      const msg = String(err?.message || err);
+      if (msg.includes(' 422')) {
+        state.featuresCreateError = `A feature named "${slug}" already exists.`;
+      } else {
+        state.featuresCreateError = msg;
+      }
+    } finally {
+      state.featuresCreating = false;
+      renderPanel();
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -3034,6 +3341,68 @@ function boot({ inIframe = false } = {}) {
       signOut();
     });
 
+    // Features
+    on('[data-action="features-refresh"]', 'click', () => loadFeatures({ force: true }));
+    on('[data-action="features-open-create"]', 'click', () => {
+      if (!requireAuth('features')) return;
+      state.featuresCreateOpen = true;
+      state.featuresCreateError = null;
+      renderPanel();
+      // Focus the name input for fast entry.
+      setTimeout(() => {
+        panelEl?.querySelector('[data-field="features-create-name"]')?.focus();
+      }, 0);
+    });
+    on('[data-action="features-cancel-create"]', 'click', () => {
+      state.featuresCreateOpen = false;
+      state.featuresCreateError = null;
+      state.featuresCreateDraft = { name: '', description: '' };
+      renderPanel();
+    });
+    on('[data-action="features-submit-create"]', 'click', submitCreateFeature);
+    const featuresSearchInput = panelEl.querySelector('[data-field="features-search"]');
+    featuresSearchInput?.addEventListener('input', (e) => {
+      state.featuresSearch = e.target.value;
+      // Cheap re-render — filter is client-side, no network involved.
+      const panel = panelEl;
+      // Only re-render the body-grid portion to avoid losing search-input focus.
+      // Simplest correct approach: full renderPanel, then refocus + restore caret.
+      const caret = e.target.selectionStart;
+      renderPanel();
+      const again = panelEl?.querySelector('[data-field="features-search"]');
+      if (again) {
+        again.focus();
+        try { again.setSelectionRange(caret, caret); } catch {}
+      }
+    });
+    const featuresNameInput = panelEl.querySelector('[data-field="features-create-name"]');
+    featuresNameInput?.addEventListener('input', (e) => {
+      state.featuresCreateDraft.name = e.target.value;
+      // Re-render only if the slug preview or can-create disabled state changed.
+      const prevSlug = slugifyFeatureNameClient(state.featuresCreateDraft.name);
+      renderPanel();
+      const again = panelEl?.querySelector('[data-field="features-create-name"]');
+      if (again) {
+        again.focus();
+        const pos = Math.min(e.target.value.length, again.value.length);
+        try { again.setSelectionRange(pos, pos); } catch {}
+      }
+    });
+    const featuresDescInput = panelEl.querySelector('[data-field="features-create-description"]');
+    featuresDescInput?.addEventListener('input', (e) => {
+      state.featuresCreateDraft.description = e.target.value;
+      // No re-render needed — nothing visible depends on this field mid-keystroke.
+    });
+    panelEl.querySelectorAll('[data-action="open-feature"]').forEach((el) => {
+      el.addEventListener('click', () => {
+        // Feature detail page is the next build step — for now, log and
+        // no-op. Leaving the click hooked up means the hit-target is live
+        // so users feel the card is interactive.
+        const name = el.dataset.feature;
+        if (DEBUG) console.log('[chorus] open feature (not yet implemented):', name);
+      });
+    });
+
     // Browse (list view)
     panelEl.querySelectorAll('.branch').forEach((el) => {
       el.addEventListener('click', () => selectBranch(el.dataset.branch));
@@ -3073,6 +3442,15 @@ function boot({ inIframe = false } = {}) {
     on('[data-action="file-only"]', 'click', () => startDiscussion(false));
 
     // Discussions
+    on('[data-action="goto-features"]', 'click', () => {
+      navigate('features');
+      loadFeatures();
+    });
+    on('[data-action="goto-features-menu"]', 'click', () => {
+      state.menuOpen = false;
+      navigate('features');
+      loadFeatures();
+    });
     on('[data-action="goto-threads"]', 'click', () => {
       navigate('threadList');
       loadThreads();

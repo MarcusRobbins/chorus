@@ -201,6 +201,85 @@ export async function getDiscussionThread(token, owner, repo, number) {
   };
 }
 
+// --- features (subreddit-style topic scopes) ------------------------------
+//
+// A feature is a GitHub label with the prefix `chorus:feature:`. The feature
+// name is whatever follows the prefix. The label description doubles as the
+// feature's own description. Colour is mostly cosmetic (shown as a swatch in
+// the UI) but users can pick one when creating.
+//
+// Threads / branches / proposals are "in" a feature by being tagged with the
+// corresponding `chorus:feature:<name>` label. Tagging is composable — one
+// item can belong to many features.
+
+const FEATURE_LABEL_PREFIX = 'chorus:feature:';
+
+// Small random-ish default colour for newly created features. Kept short;
+// GitHub expects 6-hex with no leading '#'. We pick from a palette so two
+// sibling features don't collide by default.
+const FEATURE_PALETTE = [
+  '4f46e5', '0ea5e9', '14b8a6', '10b981', '84cc16',
+  'f59e0b', 'ef4444', 'ec4899', '8b5cf6', '64748b',
+];
+export function defaultFeatureColor(seed = '') {
+  const h = [...seed].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0);
+  return FEATURE_PALETTE[Math.abs(h) % FEATURE_PALETTE.length];
+}
+
+// Validate/sanitise a user-typed feature name to a slug suitable for a
+// label. Labels can contain most characters but we keep it tight for
+// readability: lowercase, alnum + dash + underscore.
+export function slugifyFeatureName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
+export function featureLabelName(name) {
+  return `${FEATURE_LABEL_PREFIX}${slugifyFeatureName(name)}`;
+}
+
+// List all features. One GH API call (labels are paginated; we take the
+// first 100 which is plenty for a v1).
+export async function listFeatures(token, owner, repo) {
+  const labels = await gh(token, `/repos/${owner}/${repo}/labels?per_page=100`);
+  return labels
+    .filter((l) => typeof l.name === 'string' && l.name.startsWith(FEATURE_LABEL_PREFIX))
+    .map((l) => ({
+      name: l.name.slice(FEATURE_LABEL_PREFIX.length),
+      rawName: l.name,
+      description: l.description || '',
+      color: l.color || '64748b',
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Create a feature. Returns the normalised feature shape (same as listFeatures).
+// Throws on duplicate (422 from GitHub) — caller should surface a friendly error.
+export async function createFeature(token, owner, repo, { name, description, color }) {
+  const slug = slugifyFeatureName(name);
+  if (!slug) throw new Error('Feature name is required');
+  const labelName = featureLabelName(slug);
+  const labelColor = (color || defaultFeatureColor(slug)).replace(/^#/, '');
+  const created = await gh(token, `/repos/${owner}/${repo}/labels`, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: labelName,
+      color: labelColor,
+      description: description || '',
+    }),
+  });
+  return {
+    name: slug,
+    rawName: created.name,
+    description: created.description || '',
+    color: created.color || labelColor,
+  };
+}
+
 async function safeEnsureLabel(token, owner, repo, name, color, description) {
   try {
     await gh(token, `/repos/${owner}/${repo}/labels`, {
