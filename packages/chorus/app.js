@@ -1394,15 +1394,22 @@ async function loadHtml2Canvas() {
   }
   return _html2canvasPromise;
 }
-async function captureElementThumbnail(el) {
+async function captureElementThumbnail(el, timeoutMs = 3000) {
   if (!el) return null;
   try {
     const html2canvas = await loadHtml2Canvas();
-    const canvas = await html2canvas(el, {
+    // Race the render against a timeout — html2canvas can hang (or take 10+
+    // seconds) on large elements, which would freeze the pick flow. After
+    // the timeout we bail and the pin saves without a thumb.
+    const render = html2canvas(el, {
       backgroundColor: null,
       logging: false,
       useCORS: true,
     });
+    const canvas = await Promise.race([
+      render,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('thumb timeout')), timeoutMs)),
+    ]);
     const srcW = canvas.width;
     const srcH = canvas.height;
     if (!srcW || !srcH) return null;
@@ -1419,7 +1426,8 @@ async function captureElementThumbnail(el) {
     return thumb.toDataURL('image/jpeg', THUMB_QUALITY);
   } catch (err) {
     // Best-effort — many pages have tainted canvases, cross-origin images,
-    // exotic CSS that trips html2canvas, etc. Pin still saves without a thumb.
+    // exotic CSS that trips html2canvas, large targets that time out, etc.
+    // Pin still saves without a thumb.
     return null;
   }
 }
@@ -1677,6 +1685,11 @@ function bootPreviewMode() {
 function cssPath(el) {
   if (!(el instanceof Element)) return '';
   if (el.id) return '#' + CSS.escape(el.id);
+  // Root-level targets: the walk below bails before emitting anything for
+  // BODY/HTML, leaving us with an empty selector. Return a literal tag so
+  // later resolution (pin overlay, AI context) has something to work with.
+  if (el.tagName === 'BODY') return 'body';
+  if (el.tagName === 'HTML') return 'html';
   const parts = [];
   let cur = el;
   // Walk up through normal DOM *and* through shadow boundaries. When we hit
@@ -2728,8 +2741,9 @@ function boot({ inIframe = false } = {}) {
       ${featurePickerHtml}
 
       <div class="pin-card ${capture ? '' : 'empty'}">
-        ${capture?.thumb ? `<img class="pin-card-thumb" src="${esc(capture.thumb)}" alt="Element preview" />` : ''}
-        <div class="pin-card-dot ${capture ? 'filled' : ''}"></div>
+        ${capture?.thumb
+          ? `<img class="pin-card-thumb" src="${esc(capture.thumb)}" alt="Element preview" />`
+          : `<div class="pin-card-dot ${capture ? 'filled' : ''}"></div>`}
         <div class="pin-card-info">${captureInfo}</div>
         <div class="pin-card-actions">${pickBtn}</div>
       </div>
@@ -3218,8 +3232,9 @@ function boot({ inIframe = false } = {}) {
           ${issue.title ? `<h2 class="op-title">${esc(issue.title)}</h2>` : ''}
           ${t.initialText ? `<div class="op-body">${esc(t.initialText)}</div>` : ''}
           <div class="pin-card compact ${hasPin ? '' : 'empty'}">
-            ${hasPin && meta.thumb ? `<img class="pin-card-thumb" src="${esc(meta.thumb)}" alt="Pinned element preview" />` : ''}
-            <div class="pin-card-dot ${hasPin ? 'filled' : ''}"></div>
+            ${hasPin && meta.thumb
+              ? `<img class="pin-card-thumb" src="${esc(meta.thumb)}" alt="Pinned element preview" />`
+              : `<div class="pin-card-dot ${hasPin ? 'filled' : ''}"></div>`}
             <div class="pin-card-info">
               ${hasPin ? elSummary : 'Not pinned'}${pageStr ? `<span class="pin-card-page"> · ${pageStr}</span>` : ''}
             </div>
