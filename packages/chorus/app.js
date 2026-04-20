@@ -1175,6 +1175,98 @@ const CSS_TEXT = `
   }
   .lightbox-close:hover { background: rgba(255, 255, 255, 0.25); }
 
+  /* Figma-style canvas view — Three.js CSS3D scene + close button + hint */
+  .chorus-canvas {
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, #141424 0%, #0a0a14 70%);
+    z-index: 2147483647;
+    pointer-events: auto;
+    overflow: hidden;
+    cursor: grab;
+    user-select: none;
+    animation: chorusFadeIn 160ms ease;
+  }
+  .chorus-canvas.panning { cursor: grabbing; }
+  .chorus-canvas-close {
+    position: absolute; top: 16px; right: 20px;
+    z-index: 10;
+    width: 36px; height: 36px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--t-fast);
+    pointer-events: auto;
+  }
+  .chorus-canvas-close:hover { background: rgba(255, 255, 255, 0.2); }
+  .chorus-canvas-hint {
+    position: absolute; bottom: 16px; left: 20px;
+    color: rgba(255, 255, 255, 0.55);
+    font-family: var(--font-sans); font-size: 11.5px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  /* Card surface — sits inside a CSS3DObject, transformed by Three.js */
+  .chorus-canvas-card {
+    position: relative;
+    background: #ffffff;
+    border-radius: 18px;
+    box-shadow:
+      0 40px 100px rgba(0, 0, 0, 0.55),
+      0 12px 32px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    font-family: var(--font-sans);
+  }
+  .chorus-canvas-card-hdr {
+    display: flex; align-items: center; gap: 12px;
+    height: 48px; padding: 0 18px;
+    background: linear-gradient(to bottom, #fafafa, #f3f3f5);
+    border-bottom: 1px solid #e4e4e7;
+    box-sizing: border-box;
+  }
+  .chorus-canvas-card-marker {
+    display: inline-block;
+    width: 10px; height: 10px; border-radius: 999px;
+    background: #a1a1aa;
+    flex-shrink: 0;
+  }
+  .chorus-canvas-card-marker.main    { background: var(--grad-accent); }
+  .chorus-canvas-card-marker.feature { background: #10b981; }
+  .chorus-canvas-card-marker.auto    { background: #f59e0b; }
+  .chorus-canvas-card-title {
+    font-family: var(--font-mono); font-size: 18px; font-weight: 600;
+    color: #18181b;
+    letter-spacing: -0.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chorus-canvas-card-frame {
+    position: absolute;
+    top: 48px; left: 0;
+    width: 100%; height: calc(100% - 48px);
+    border: 0;
+    /* pointer-events is also set inline; CSS here is a belt-and-braces */
+    pointer-events: none;
+  }
+  .chorus-canvas-card-click {
+    position: absolute;
+    top: 48px; left: 0; right: 0; bottom: 0;
+    pointer-events: auto;
+    cursor: pointer;
+    /* Subtle hover tint to show the card is clickable */
+    transition: background 180ms ease;
+  }
+  .chorus-canvas-card-click:hover {
+    background: rgba(79, 70, 229, 0.04);
+  }
+
   /* Per-comment action row + pin/branch badges */
   .comment-actions {
     display: flex; align-items: center; gap: 6px;
@@ -2062,6 +2154,11 @@ function boot({ inIframe = false } = {}) {
     // Image lightbox for pin thumbnails. Holds a data-URL when open, null
     // when closed. Rendered as a full-screen overlay by renderLightbox.
     lightboxSrc: null,                  // string | null
+
+    // Figma-style canvas view (Three.js CSS3DRenderer). Module is lazy-
+    // imported on first open; instance holds a { destroy } handle.
+    canvasOpen: false,
+    canvasInstance: null,               // { destroy } or null
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -2502,6 +2599,33 @@ function boot({ inIframe = false } = {}) {
     renderLightbox();
   }
 
+  // Figma-style canvas view. Lazy-loads Three.js on first open so the main
+  // chorus bundle stays lean — the ~150 KB three import only hits the wire
+  // when the user actually wants the canvas.
+  async function openCanvasView() {
+    if (state.canvasOpen) return;
+    state.canvasOpen = true;
+    // Close the panel while canvas is up; it'd be visually competing for
+    // screen real estate and the canvas already has its own ✕.
+    closePanel();
+    try {
+      const mod = await import('./canvas.js');
+      const inst = await mod.createCanvas({
+        hostRoot: root,
+        branches: state.branches || [],
+        previewUrlFor,
+        onClose: () => {
+          state.canvasOpen = false;
+          state.canvasInstance = null;
+        },
+      });
+      state.canvasInstance = inst;
+    } catch (err) {
+      console.warn('[chorus] canvas open failed', err);
+      state.canvasOpen = false;
+    }
+  }
+
   // Full-viewport modal that displays a pin thumbnail at natural size.
   // Opens when state.lightboxSrc is set (by clicking a thumb). Closes on
   // click outside the image, on the ✕ button, or on Esc.
@@ -2631,6 +2755,10 @@ function boot({ inIframe = false } = {}) {
         <button class="menu-item" data-action="goto-features-menu">
           <span class="menu-check"></span>
           <span>Features</span>
+        </button>
+        <button class="menu-item" data-action="open-canvas-menu">
+          <span class="menu-check"></span>
+          <span>Canvas (beta)</span>
         </button>
         <div class="menu-divider"></div>
         <div class="menu-section-label">View</div>
@@ -4545,6 +4673,11 @@ function boot({ inIframe = false } = {}) {
       state.pendingFeatureTag = null;
       navigate('features');
       loadFeatures();
+    });
+    on('[data-action="open-canvas-menu"]', 'click', () => {
+      state.menuOpen = false;
+      renderPanel();       // close the menu UI immediately
+      openCanvasView();
     });
     on('[data-action="goto-threads"]', 'click', () => {
       navigate('threadList');
