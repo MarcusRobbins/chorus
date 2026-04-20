@@ -1032,11 +1032,136 @@ const CSS_TEXT = `
     white-space: pre-wrap; word-break: break-word;
   }
 
-  .reply-composer {
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--c-border);
+  /* Main composer — reddit-style "Add a comment" under the OP. Collapsed
+     by default: just a textarea. On focus-within OR when the container
+     has the .has-content class (non-empty draft), expands to show the
+     toolbar and gives the textarea more room. */
+  .main-composer {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-bg);
+    margin: 10px 0 12px;
+    overflow: hidden;
+    transition: box-shadow var(--t-fast), border-color var(--t-fast);
   }
+  .main-composer:focus-within {
+    border-color: var(--c-accent);
+    box-shadow: 0 0 0 3px var(--c-accent-bg);
+  }
+  .main-composer-input {
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: vertical;
+    padding: 10px 12px;
+    font: inherit; font-size: 13px; line-height: 1.55;
+    color: var(--c-text);
+    background: transparent;
+    min-height: 38px;
+    box-sizing: border-box;
+    transition: min-height var(--t-fast);
+  }
+  .main-composer:focus-within .main-composer-input,
+  .main-composer.has-content .main-composer-input {
+    min-height: 96px;
+  }
+  .main-composer-toolbar {
+    display: none;
+    gap: 6px; justify-content: flex-end;
+    padding: 6px 8px;
+    border-top: 1px solid var(--c-border);
+    background: var(--c-bg-subtle);
+  }
+  .main-composer:focus-within .main-composer-toolbar,
+  .main-composer.has-content .main-composer-toolbar {
+    display: flex;
+  }
+  .main-composer-toolbar button.sm {
+    font-size: 11.5px; padding: 4px 10px;
+  }
+
+  /* Inline reply composer (appears under a specific comment when user
+     clicks Reply). Same collapsed/expanded pattern as the main one, but
+     always starts focused when rendered so it feels modal. */
+  .inline-reply-composer {
+    display: flex; flex-direction: column;
+    margin: 4px 0 8px 34px;   /* align with comment-main (skip vote col) */
+    border: 1px solid var(--c-accent);
+    border-radius: var(--r-md);
+    background: var(--c-bg);
+    box-shadow: 0 0 0 3px var(--c-accent-bg);
+    overflow: hidden;
+  }
+  .inline-reply-composer.depth-1 {
+    margin-left: 58px;         /* deeper indent when replying to a reply */
+  }
+  .inline-reply-composer textarea {
+    width: 100%;
+    border: none; outline: none; resize: vertical;
+    padding: 8px 10px;
+    font: inherit; font-size: 12.5px; line-height: 1.5;
+    color: var(--c-text);
+    background: transparent;
+    min-height: 70px;
+    box-sizing: border-box;
+  }
+  .inline-reply-toolbar {
+    display: flex; gap: 6px; justify-content: flex-end;
+    padding: 6px 8px;
+    border-top: 1px solid var(--c-border);
+    background: var(--c-bg-subtle);
+  }
+  .inline-reply-toolbar button.sm {
+    font-size: 11px; padding: 3px 10px;
+  }
+
+  /* Nested replies are indented under their root comment with a subtle
+     left rule, reddit-style. */
+  .comment-thread {
+    display: flex; flex-direction: column;
+  }
+  .comment-replies {
+    padding-left: 24px;
+    border-left: 2px solid var(--c-border);
+    margin-left: 14px;
+  }
+  .reddit-comment.depth-1 {
+    /* Subtle background distinction for replies. */
+  }
+
+  /* Lightbox overlay for pin thumbnails */
+  .pin-card-thumb, .comment-badge-thumb {
+    cursor: zoom-in;
+  }
+  .lightbox {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 10, 0.82);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 2147483647;
+    padding: 24px;
+    animation: chorusFadeIn 120ms ease;
+  }
+  @keyframes chorusFadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .lightbox-img {
+    max-width: 100%; max-height: 100%;
+    border-radius: var(--r-md);
+    box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5);
+    background: #fff;
+    object-fit: contain;
+  }
+  .lightbox-close {
+    position: absolute; top: 16px; right: 20px;
+    width: 36px; height: 36px;
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 999px;
+    font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--t-fast);
+  }
+  .lightbox-close:hover { background: rgba(255, 255, 255, 0.25); }
 
   /* Per-comment action row + pin/branch badges */
   .comment-actions {
@@ -1891,6 +2016,14 @@ function boot({ inIframe = false } = {}) {
     // Same idea at the comment level: when the user hits "Pin element" on
     // a specific comment, the next pick routes into that comment's meta.
     pinningCommentId: null,             // number | null
+
+    // Inline reply composer per-comment. Only one can be open at a time.
+    replyToCommentId: null,             // number | null — which comment has open inline composer
+    replyToCommentDraft: '',            // the inline reply draft text
+
+    // Image lightbox for pin thumbnails. Holds a data-URL when open, null
+    // when closed. Rendered as a full-screen overlay by renderLightbox.
+    lightboxSrc: null,                  // string | null
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -2113,6 +2246,7 @@ function boot({ inIframe = false } = {}) {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (state.lightboxSrc) { state.lightboxSrc = null; renderPanel(); return; }
     if (state.settingsModalOpen) { state.settingsModalOpen = false; renderPanel(); return; }
     if (state.menuOpen) { state.menuOpen = false; renderPanel(); }
   });
@@ -2327,6 +2461,31 @@ function boot({ inIframe = false } = {}) {
     wirePanel();
     renderTrigger();
     renderSettingsModal();
+    renderLightbox();
+  }
+
+  // Full-viewport modal that displays a pin thumbnail at natural size.
+  // Opens when state.lightboxSrc is set (by clicking a thumb). Closes on
+  // click outside the image, on the ✕ button, or on Esc.
+  let lightboxEl = null;
+  function renderLightbox() {
+    if (!state.lightboxSrc) {
+      if (lightboxEl) { lightboxEl.remove(); lightboxEl = null; }
+      return;
+    }
+    if (lightboxEl) lightboxEl.remove();
+    lightboxEl = document.createElement('div');
+    lightboxEl.className = 'lightbox';
+    lightboxEl.innerHTML = `
+      <button class="lightbox-close" data-action="close-lightbox" title="Close (Esc)">✕</button>
+      <img class="lightbox-img" src="${esc(state.lightboxSrc)}" alt="Pinned element preview" />
+    `;
+    root.appendChild(lightboxEl);
+    const close = () => { state.lightboxSrc = null; renderPanel(); };
+    lightboxEl.addEventListener('click', (e) => {
+      if (e.target === lightboxEl) close();
+    });
+    lightboxEl.querySelector('[data-action="close-lightbox"]')?.addEventListener('click', close);
   }
 
   let settingsModalEl = null;
@@ -3253,6 +3412,8 @@ function boot({ inIframe = false } = {}) {
         </div>
       </article>
 
+      ${issueOpen ? renderMainComposer() : ''}
+
       <div class="comments-header">
         <span class="comments-count">${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}</span>
         <span class="comments-sort muted-s">sorted by <strong>new</strong></span>
@@ -3261,19 +3422,101 @@ function boot({ inIframe = false } = {}) {
       <div class="comments-section">
         ${comments.length === 0
           ? `<div class="muted-s" style="padding:8px 4px">No comments yet. Be the first.</div>`
-          : comments.map(redditComment).join('')}
+          : renderCommentTree(comments)}
       </div>
-
-      ${issueOpen ? `
-        <label class="field reply-composer">
-          Add a comment
-          <textarea data-field="thread-reply" placeholder="Reply to discuss — or describe a change and click 🤖 Build with AI to spin up a branch.">${esc(state.threadComposeDraft || '')}</textarea>
-        </label>
-      ` : ''}
     `;
   }
 
-  function redditComment(c) {
+  // Reddit-style main "Add a comment" composer. Sits directly under the OP
+  // in the thread view. Collapsed by default: just a textarea. On focus
+  // (or when there's draft text), the textarea grows and the Comment /
+  // Build-with-AI buttons become visible via :focus-within and the
+  // .has-content class.
+  function renderMainComposer() {
+    const draft = state.threadComposeDraft || '';
+    const hasDraft = draft.trim().length > 0;
+    return `
+      <div class="main-composer ${hasDraft ? 'has-content' : ''}">
+        <textarea
+          class="main-composer-input"
+          data-field="thread-reply"
+          placeholder="Add a comment…"
+        >${esc(draft)}</textarea>
+        <div class="main-composer-toolbar">
+          <button class="primary sm" data-action="post-thread-reply" ${hasDraft ? '' : 'disabled'}>Comment</button>
+          <button class="sm" data-action="thread-build" ${hasDraft ? '' : 'disabled'} title="Spin up a branch: run AI with this message as the prompt">🤖 Build with AI</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Group comments into a parent/reply tree, capping depth at one level.
+  // A reply to a reply gets its parent set to the first-level ancestor so
+  // the visual structure stays "root → direct replies", never deeper.
+  function renderCommentTree(comments) {
+    const parsed = comments.map((c) => ({
+      c,
+      meta: gh.parseCommentMeta(c.body || '') || {},
+    }));
+    // Roots: comments with no parent meta, or whose parent isn't in this
+    // thread (stale reference). Replies: the rest, grouped by parent id.
+    const idSet = new Set(parsed.map((p) => String(p.c.id)));
+    const rootsOrdered = [];
+    const repliesByParent = new Map();
+    for (const p of parsed) {
+      const parentId = p.meta?.parent;
+      if (parentId != null && idSet.has(String(parentId))) {
+        const list = repliesByParent.get(String(parentId)) || [];
+        list.push(p);
+        repliesByParent.set(String(parentId), list);
+      } else {
+        rootsOrdered.push(p);
+      }
+    }
+    return rootsOrdered.map((p) => {
+      const replies = repliesByParent.get(String(p.c.id)) || [];
+      const replyHtml = replies.map((r) => redditComment(r.c, 1)).join('');
+      const inlineReply = state.replyToCommentId != null && String(state.replyToCommentId) === String(p.c.id)
+        ? renderInlineReplyComposer(p.c.id, 1)
+        : '';
+      return `
+        <div class="comment-thread">
+          ${redditComment(p.c, 0)}
+          ${inlineReply}
+          ${replies.length ? `
+            <div class="comment-replies">
+              ${replies.map((r) => {
+                const nestedInline = state.replyToCommentId != null && String(state.replyToCommentId) === String(r.c.id)
+                  ? renderInlineReplyComposer(r.c.id, 1)
+                  : '';
+                return redditComment(r.c, 1) + nestedInline;
+              }).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderInlineReplyComposer(commentId, depth) {
+    const draft = state.replyToCommentDraft || '';
+    const hasDraft = draft.trim().length > 0;
+    return `
+      <div class="inline-reply-composer depth-${depth}" data-parent="${commentId}">
+        <textarea
+          data-field="inline-reply"
+          data-parent="${commentId}"
+          placeholder="Reply…"
+        >${esc(draft)}</textarea>
+        <div class="inline-reply-toolbar">
+          <button class="sm" data-action="cancel-inline-reply">Cancel</button>
+          <button class="primary sm" data-action="post-inline-reply" data-parent="${commentId}" ${hasDraft ? '' : 'disabled'}>Reply</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function redditComment(c, depth = 0) {
     const author = c.user || c.author || {};
     const cmeta = gh.parseCommentMeta(c.body || '') || {};
     const cleanBody = gh.stripCommentMeta(c.body || '');
@@ -3295,8 +3538,9 @@ function boot({ inIframe = false } = {}) {
     const pinLabel = pinning ? 'Picking…' : (hasPin ? 'Re-pin' : 'Pin element');
     const buildLabel = buildingFromThis ? 'Building…' : '🤖 Build with AI';
 
+    const issueOpen = state.currentThread?.issue?.state === 'open';
     return `
-      <div class="reddit-comment" data-comment-id="${c.id}">
+      <div class="reddit-comment depth-${depth}" data-comment-id="${c.id}">
         <div class="vote-col">
           <button class="vote-btn up" data-action="vote-comment" data-comment-id="${c.id}" data-dir="up" ${authed ? '' : 'disabled'} title="Upvote">▲</button>
           <span class="vote-score">${score}</span>
@@ -3325,6 +3569,7 @@ function boot({ inIframe = false } = {}) {
           ` : ''}
           ${authed ? `
             <div class="comment-actions">
+              ${issueOpen ? `<button class="link-btn" data-action="open-inline-reply" data-comment-id="${c.id}">Reply</button>` : ''}
               <button class="link-btn" data-action="pin-comment" data-comment-id="${c.id}" ${pinning ? 'disabled' : ''}>${pinLabel}</button>
               ${hasPin ? `<button class="link-btn" data-action="unpin-comment" data-comment-id="${c.id}">Unpin</button>` : ''}
               <button class="link-btn" data-action="build-from-comment" data-comment-id="${c.id}" ${buildingFromThis ? 'disabled' : ''}>${buildLabel}</button>
@@ -3336,18 +3581,16 @@ function boot({ inIframe = false } = {}) {
   }
 
   function threadViewActions() {
-    const hasDraft = (state.threadComposeDraft || '').trim().length > 0;
+    // Thread-level actions (Comment / Build with AI) now live inline in
+    // the main composer right under the OP. Resolve lives in the OP's
+    // action row. This action bar only surfaces the "thread resolved"
+    // state message if the issue has been closed.
     const t = state.currentThread;
     const issueOpen = t?.issue?.state === 'open';
     if (!issueOpen) {
       return `<div class="secondary"><span class="muted-s">Thread resolved</span></div>`;
     }
-    return `
-      <div class="secondary">
-        <button data-action="post-thread-reply" ${hasDraft ? '' : 'disabled'}>Comment</button>
-      </div>
-      <button class="primary" data-action="thread-build" ${hasDraft ? '' : 'disabled'} title="Spin up a branch: run AI with this message as the prompt">🤖 Build with AI</button>
-    `;
+    return '';
   }
 
   function relativeTimeStr(iso) {
@@ -3696,6 +3939,33 @@ function boot({ inIframe = false } = {}) {
       renderPanel();
     } catch (err) {
       console.warn('[chorus] post reply failed', err);
+    }
+  }
+
+  // Post a nested reply to a specific comment. parent id is stored in the
+  // new comment's meta block so we can render it as a child of the target.
+  // If the target is already a reply (depth 1), we walk up to its root so
+  // the depth stays capped at one — replies-to-replies become siblings of
+  // the first reply, Discord-style, rather than growing a deeper tree.
+  async function postInlineReply(parentCommentId) {
+    const t = state.currentThread;
+    if (!t?.issue) return;
+    const text = (state.replyToCommentDraft || '').trim();
+    if (!text) return;
+    // Resolve the effective root parent: if parentCommentId is itself a
+    // reply, its parent is the root; we attach to that same root.
+    const directParent = t.comments?.find((c) => String(c.id) === String(parentCommentId));
+    const directMeta = directParent ? (gh.parseCommentMeta(directParent.body || '') || {}) : {};
+    const rootParent = directMeta.parent != null ? directMeta.parent : parentCommentId;
+    const body = gh.buildCommentBody({ meta: { parent: Number(rootParent) }, text });
+    try {
+      const comment = await gh.createIssueComment(state.token, OWNER, REPONAME, t.issue.number, body);
+      t.comments = [...(t.comments || []), comment];
+      state.replyToCommentId = null;
+      state.replyToCommentDraft = '';
+      renderPanel();
+    } catch (err) {
+      console.warn('[chorus] post inline reply failed', err);
     }
   }
 
@@ -4305,6 +4575,61 @@ function boot({ inIframe = false } = {}) {
         const name = el.dataset.branch;
         if (!name) return;
         selectBranch(name);
+      });
+    });
+
+    // Inline reply composer — open, cancel, post.
+    panelEl.querySelectorAll('[data-action="open-inline-reply"]').forEach((el) => {
+      el.addEventListener('click', () => {
+        if (!requireAuth('threadView')) return;
+        const id = el.dataset.commentId;
+        // If user clicks Reply on a comment that already has the inline
+        // composer open, toggle it closed. Otherwise switch (or open).
+        if (state.replyToCommentId != null && String(state.replyToCommentId) === String(id)) {
+          state.replyToCommentId = null;
+          state.replyToCommentDraft = '';
+        } else {
+          state.replyToCommentId = id;
+          state.replyToCommentDraft = '';
+        }
+        renderPanel();
+        // Autofocus the newly-opened textarea.
+        if (state.replyToCommentId != null) {
+          setTimeout(() => {
+            panelEl?.querySelector(`[data-field="inline-reply"][data-parent="${id}"]`)?.focus();
+          }, 0);
+        }
+      });
+    });
+    on('[data-action="cancel-inline-reply"]', 'click', () => {
+      state.replyToCommentId = null;
+      state.replyToCommentDraft = '';
+      renderPanel();
+    });
+    panelEl.querySelectorAll('[data-action="post-inline-reply"]').forEach((el) => {
+      el.addEventListener('click', () => postInlineReply(el.dataset.parent));
+    });
+    const inlineReplyTa = panelEl.querySelector('[data-field="inline-reply"]');
+    inlineReplyTa?.addEventListener('input', (e) => {
+      const prev = (state.replyToCommentDraft || '').trim().length > 0;
+      const now = e.target.value.trim().length > 0;
+      state.replyToCommentDraft = e.target.value;
+      if (prev !== now) {
+        // Re-render so the Reply button's disabled state flips.
+        renderPanel();
+        const again = panelEl?.querySelector('[data-field="inline-reply"]');
+        if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+      }
+    });
+
+    // (post-thread-reply and thread-build are already wired higher up.)
+
+    // Pin thumbnails — click to open in a lightbox.
+    panelEl.querySelectorAll('.pin-card-thumb, .comment-badge-thumb').forEach((img) => {
+      img.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.lightboxSrc = img.getAttribute('src') || null;
+        renderPanel();
       });
     });
 
