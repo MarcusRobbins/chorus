@@ -880,6 +880,20 @@ const CSS_TEXT = `
     display: flex; gap: 4px; flex-shrink: 0;
     align-items: center;
   }
+  /* Thumbnail of the pinned element, captured at pick time via html2canvas. */
+  .pin-card-thumb {
+    display: block;
+    width: 72px; height: 44px;
+    border-radius: var(--r-xs);
+    border: 1px solid var(--c-border);
+    background: #fff;
+    object-fit: cover;
+    flex-shrink: 0;
+    align-self: flex-start;
+  }
+  .pin-card.compact .pin-card-thumb {
+    width: 56px; height: 34px;
+  }
 
   /* Reddit-style thread view — OP card on top, vote column down the left,
      comments underneath with their own vote columns, reply composer at
@@ -1050,6 +1064,15 @@ const CSS_TEXT = `
   }
   .comment-badge.pin .pin-card-dot {
     width: 8px; height: 8px; margin-top: 0;
+  }
+  .comment-badge-thumb {
+    display: block;
+    width: 44px; height: 26px;
+    border-radius: 3px;
+    border: 1px solid var(--c-border);
+    background: #fff;
+    object-fit: cover;
+    flex-shrink: 0;
   }
   .comment-badge.branch {
     background: var(--c-bg-muted);
@@ -2651,6 +2674,7 @@ function boot({ inIframe = false } = {}) {
       ${featurePickerHtml}
 
       <div class="pin-card ${capture ? '' : 'empty'}">
+        ${capture?.thumb ? `<img class="pin-card-thumb" src="${esc(capture.thumb)}" alt="Element preview" />` : ''}
         <div class="pin-card-dot ${capture ? 'filled' : ''}"></div>
         <div class="pin-card-info">${captureInfo}</div>
         <div class="pin-card-actions">${pickBtn}</div>
@@ -3140,6 +3164,7 @@ function boot({ inIframe = false } = {}) {
           ${issue.title ? `<h2 class="op-title">${esc(issue.title)}</h2>` : ''}
           ${t.initialText ? `<div class="op-body">${esc(t.initialText)}</div>` : ''}
           <div class="pin-card compact ${hasPin ? '' : 'empty'}">
+            ${hasPin && meta.thumb ? `<img class="pin-card-thumb" src="${esc(meta.thumb)}" alt="Pinned element preview" />` : ''}
             <div class="pin-card-dot ${hasPin ? 'filled' : ''}"></div>
             <div class="pin-card-info">
               ${hasPin ? elSummary : 'Not pinned'}${pageStr ? `<span class="pin-card-page"> · ${pageStr}</span>` : ''}
@@ -3217,7 +3242,7 @@ function boot({ inIframe = false } = {}) {
           ${cleanBody ? `<div class="comment-body">${esc(cleanBody)}</div>` : ''}
           ${hasPin ? `
             <div class="comment-badge pin">
-              <span class="pin-card-dot filled"></span>
+              ${pin.thumb ? `<img class="comment-badge-thumb" src="${esc(pin.thumb)}" alt="Pinned element preview" />` : `<span class="pin-card-dot filled"></span>`}
               <span><${esc(pin.tag)}>${pin.text ? ` “${esc(pin.text.slice(0, 40))}${pin.text.length > 40 ? '…' : ''}”` : ''}</span>
             </div>
           ` : ''}
@@ -3331,6 +3356,7 @@ function boot({ inIframe = false } = {}) {
         tag: cap.tag,
         page: state.currentPath || 'index.html',
         bbox: cap.rect,
+        ...(cap.thumb ? { thumb: cap.thumb } : {}),
       } : {
         page: state.currentPath || 'index.html',
       };
@@ -3435,6 +3461,7 @@ function boot({ inIframe = false } = {}) {
       tag: capture.tag,
       page: state.currentPath || 'index.html',
       bbox: capture.rect,
+      ...(capture.thumb ? { thumb: capture.thumb } : {}),
     };
     try {
       await gh.updateThreadMeta(state.token, OWNER, REPONAME, number, {
@@ -3500,6 +3527,7 @@ function boot({ inIframe = false } = {}) {
         text: capture.text,
         tag: capture.tag,
         bbox: capture.rect,
+        ...(capture.thumb ? { thumb: capture.thumb } : {}),
       },
     };
     try {
@@ -4415,7 +4443,7 @@ function boot({ inIframe = false } = {}) {
     overlayEl.style.width = r.width + 'px';
     overlayEl.style.height = r.height + 'px';
   }
-  function onPickClick(e) {
+  async function onPickClick(e) {
     if (isOurs(e.target)) return;
     e.preventDefault(); e.stopPropagation();
     const el = e.target; const r = el.getBoundingClientRect();
@@ -4437,6 +4465,14 @@ function boot({ inIframe = false } = {}) {
     document.removeEventListener('mousemove', onPickHover, true);
     document.removeEventListener('click', onPickClick, true);
     document.removeEventListener('keydown', onPickKey, true);
+    // Capture a thumbnail of the picked element BEFORE we reopen the panel
+    // and tear down the live DOM around it. Slight delay (~100-400ms) on
+    // first pick while html2canvas loads; subsequent picks are instant.
+    // Failure is silent — the pin still saves without an image.
+    try {
+      const thumb = await captureElementThumbnail(el);
+      if (thumb) capture.thumb = thumb;
+    } catch { /* best-effort */ }
     if (pinningNumber) {
       state.pinningThreadNumber = null;
       openPanel();            // re-open the panel on threadView
@@ -4452,6 +4488,53 @@ function boot({ inIframe = false } = {}) {
   }
   function onPickKey(e) { if (e.key === 'Escape') exitPickMode(); }
   function isOurs(el) { return host.contains(el) || el === host; }
+
+  // Capture a small JPEG thumbnail of a DOM element. Lazy-loads html2canvas
+  // on first pin so the library isn't fetched for users who never pin
+  // anything. Caches the module on window to avoid repeated imports.
+  // Returns a data:image/jpeg URL, or null if rendering fails (tainted
+  // canvas, cross-origin images without CORS, etc.).
+  const THUMB_MAX_W = 320;
+  const THUMB_MAX_H = 160;
+  const THUMB_QUALITY = 0.62;
+  let _html2canvasPromise = null;
+  async function loadHtml2Canvas() {
+    if (!_html2canvasPromise) {
+      _html2canvasPromise = import('https://esm.sh/html2canvas@1.4.1')
+        .then((m) => m.default || m);
+    }
+    return _html2canvasPromise;
+  }
+  async function captureElementThumbnail(el) {
+    if (!el) return null;
+    try {
+      const html2canvas = await loadHtml2Canvas();
+      const canvas = await html2canvas(el, {
+        backgroundColor: null,
+        logging: false,
+        useCORS: true,
+        scale: window.devicePixelRatio > 1 ? 1 : 1,
+      });
+      const srcW = canvas.width;
+      const srcH = canvas.height;
+      if (!srcW || !srcH) return null;
+      const scale = Math.min(THUMB_MAX_W / srcW, THUMB_MAX_H / srcH, 1);
+      const thumbW = Math.max(1, Math.round(srcW * scale));
+      const thumbH = Math.max(1, Math.round(srcH * scale));
+      const thumb = document.createElement('canvas');
+      thumb.width = thumbW;
+      thumb.height = thumbH;
+      const ctx = thumb.getContext('2d');
+      // Light checker background so transparent captures read as "image".
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, thumbW, thumbH);
+      ctx.drawImage(canvas, 0, 0, thumbW, thumbH);
+      return thumb.toDataURL('image/jpeg', THUMB_QUALITY);
+    } catch (err) {
+      if (DEBUG) console.warn('[chorus] thumb capture failed', err);
+      return null;
+    }
+  }
 
   // ═══════════════════════════════════════════════════════════════
   // GitHub device flow
