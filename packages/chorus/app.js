@@ -1132,7 +1132,13 @@ const CSS_TEXT = `
 
   /* Lightbox overlay for pin thumbnails */
   .pin-card-thumb, .comment-badge-thumb {
-    cursor: zoom-in;
+    cursor: pointer;
+    transition: transform var(--t-fast), box-shadow var(--t-fast), filter var(--t-fast);
+  }
+  .pin-card-thumb:hover, .comment-badge-thumb:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow: var(--shadow-sm);
   }
   .lightbox {
     position: fixed; inset: 0;
@@ -1508,9 +1514,20 @@ const CSS_TEXT = `
 // by the outer boot()'s picker AND by the inner bootPreviewMode()'s
 // pick — so it lives at module scope.
 // ───────────────────────────────────────────────────────────────────
-const THUMB_MAX_W = 320;
-const THUMB_MAX_H = 160;
-const THUMB_QUALITY = 0.62;
+// Thumbnails are stored as JPEG data-URLs inside the pin meta block. Target
+// size is "looks good when zoomed to ~960 on desktop but fits inside a GH
+// issue body". We supersample by capturing at 2× device pixels, then
+// downsample to THUMB_MAX_* with smooth image rendering. Final encoded
+// size is capped by a quality cascade: try high quality first, step down
+// until we fit under THUMB_MAX_BYTES.
+const THUMB_MAX_W = 960;
+const THUMB_MAX_H = 540;
+const THUMB_CAPTURE_SCALE = 2;  // supersample to keep text / thin lines crisp
+// GitHub's issue/comment body is 65536 chars. We budget 55 KB for the
+// thumbnail's data-URL so there's room left for the rest of the meta +
+// the actual message text. Base64 bloats ~1.37× so this corresponds to
+// a ~40 KB binary JPEG.
+const THUMB_MAX_BYTES = 55000;
 let _html2canvasPromise = null;
 async function loadHtml2Canvas() {
   if (!_html2canvasPromise) {
@@ -1519,25 +1536,29 @@ async function loadHtml2Canvas() {
   }
   return _html2canvasPromise;
 }
-async function captureElementThumbnail(el, timeoutMs = 3000) {
+async function captureElementThumbnail(el, timeoutMs = 4000) {
   if (!el) return null;
   try {
     const html2canvas = await loadHtml2Canvas();
-    // Race the render against a timeout — html2canvas can hang (or take 10+
-    // seconds) on large elements, which would freeze the pick flow. After
-    // the timeout we bail and the pin saves without a thumb.
+    // Race the render against a timeout — html2canvas can hang (or take
+    // many seconds) on large / complex DOMs, which would freeze the pick
+    // flow. After the timeout we bail and the pin saves without a thumb.
     const render = html2canvas(el, {
       backgroundColor: null,
       logging: false,
       useCORS: true,
+      scale: THUMB_CAPTURE_SCALE,
     });
-    const canvas = await Promise.race([
+    const src = await Promise.race([
       render,
       new Promise((_, rej) => setTimeout(() => rej(new Error('thumb timeout')), timeoutMs)),
     ]);
-    const srcW = canvas.width;
-    const srcH = canvas.height;
+    const srcW = src.width;
+    const srcH = src.height;
     if (!srcW || !srcH) return null;
+    // Downsample to target dimensions. Never upscale (scale capped at 1×
+    // of the captured canvas) — upscaling a small element wouldn't add
+    // detail, just make the file bigger.
     const scale = Math.min(THUMB_MAX_W / srcW, THUMB_MAX_H / srcH, 1);
     const thumbW = Math.max(1, Math.round(srcW * scale));
     const thumbH = Math.max(1, Math.round(srcH * scale));
@@ -1545,10 +1566,21 @@ async function captureElementThumbnail(el, timeoutMs = 3000) {
     thumb.width = thumbW;
     thumb.height = thumbH;
     const ctx = thumb.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, thumbW, thumbH);
-    ctx.drawImage(canvas, 0, 0, thumbW, thumbH);
-    return thumb.toDataURL('image/jpeg', THUMB_QUALITY);
+    ctx.drawImage(src, 0, 0, thumbW, thumbH);
+    // Quality cascade — pick the highest-quality encoding that still fits
+    // under the byte budget. In practice most captures fit at 0.85, but
+    // busy pages or large elements step down automatically.
+    const qualities = [0.85, 0.78, 0.7, 0.62, 0.55, 0.48, 0.4];
+    for (const q of qualities) {
+      const dataUrl = thumb.toDataURL('image/jpeg', q);
+      if (dataUrl.length <= THUMB_MAX_BYTES) return dataUrl;
+    }
+    // Fallback: return the lowest-quality version even if over budget.
+    return thumb.toDataURL('image/jpeg', 0.35);
   } catch (err) {
     // Best-effort — many pages have tainted canvases, cross-origin images,
     // exotic CSS that trips html2canvas, large targets that time out, etc.
