@@ -199,6 +199,17 @@ export async function createDiscussionThread(token, owner, repo, { title, text, 
   });
 }
 
+// Update a thread's pinned-element metadata (and/or its text) by rewriting
+// the issue body. Existing text and meta are both replaced — pass the current
+// text through if you only want to update the meta.
+export async function updateThreadMeta(token, owner, repo, number, { meta, text }) {
+  const body = buildThreadBody({ meta, text });
+  return gh(token, `/repos/${owner}/${repo}/issues/${number}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ body }),
+  });
+}
+
 // Remove the thread label so the issue becomes a regular ticket.
 // GitHub's label-removal endpoint is label-specific; we use it to avoid
 // clobbering any other labels on the issue.

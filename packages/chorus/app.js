@@ -845,9 +845,26 @@ const CSS_TEXT = `
                 0 0 0 3px color-mix(in srgb, var(--c-accent) 15%, transparent);
     flex-shrink: 0; margin-top: 2px;
   }
+  .thread-pin-info {
+    flex: 1 1 auto; min-width: 0;
+  }
   .thread-pin-el {
     font-family: var(--font-mono); font-size: 12px; color: var(--c-accent-fg);
     word-break: break-all;
+  }
+  .thread-pin-el.empty {
+    font-family: var(--font-sans);
+    color: var(--c-text-muted);
+    font-style: italic;
+  }
+  /* Unpinned variant: a softer surface that reads as "optional context" */
+  .thread-pin.unpinned {
+    background: var(--c-bg-subtle);
+    border-color: var(--c-border);
+  }
+  .thread-pin.unpinned .thread-pin-dot {
+    background: var(--c-bg-muted);
+    box-shadow: inset 0 0 0 1px var(--c-border);
   }
   .thread-discussion {
     display: flex; flex-direction: column; gap: 8px;
@@ -1635,6 +1652,10 @@ function boot({ inIframe = false } = {}) {
     // feature name through the propose flow so the created thread is tagged
     // with it. Cleared after the thread is created (or cancelled).
     pendingFeatureTag: null,            // string | null (feature name)
+
+    // When the user hits "Pin to element" on the thread view, the next pick
+    // updates that thread's meta instead of filling state.capture.
+    pinningThreadNumber: null,          // number | null
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -2449,10 +2470,10 @@ function boot({ inIframe = false } = {}) {
     const captureClass = capture ? 'capture' : 'capture empty';
     const captureText = capture
       ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
-      : 'nothing selected';
+      : 'No element pinned (optional — you can pin one now or later from the thread).';
     const featureTag = state.pendingFeatureTag;
     return `
-      <p class="muted">Drop a comment pinned to an element. From inside the thread, any reply can trigger an AI build on its own branch.</p>
+      <p class="muted">Start a thread. Optionally pin it to an element on the page — you can always pin one later from the thread view.</p>
       ${featureTag ? `
         <div class="feature-chip-row">
           <span class="muted-s">in feature:</span>
@@ -2462,7 +2483,7 @@ function boot({ inIframe = false } = {}) {
         </div>
       ` : ''}
       <div>
-        <div class="muted-s" style="margin-bottom:6px;">Selected element</div>
+        <div class="muted-s" style="margin-bottom:6px;">Pinned element <span style="opacity:0.7">(optional)</span></div>
         <div class="${captureClass}">${esc(captureText)}</div>
       </div>
       <label class="field">
@@ -2475,13 +2496,15 @@ function boot({ inIframe = false } = {}) {
 
   function proposeActions() {
     const hasText = state.description.trim();
-    const hasElement = !!state.capture;
-    const canStart = hasText && hasElement && !state.filing;
+    const canStart = hasText && !state.filing;
     const startLabel = state.filing ? 'Starting…' : 'Start thread';
+    const pickLabel = state.pickMode
+      ? 'Cancel pick'
+      : (state.capture ? 'Re-pick element' : 'Pin element');
     return `
       <div class="secondary">
-        <button data-action="pick">${state.pickMode ? 'Cancel pick' : 'Pick element'}</button>
-        ${state.capture ? `<button data-action="clear-capture">Clear</button>` : ''}
+        <button data-action="pick">${pickLabel}</button>
+        ${state.capture ? `<button data-action="clear-capture">Unpin</button>` : ''}
       </div>
       <button class="primary" data-action="start-discussion" ${canStart ? '' : 'disabled'}>${startLabel}</button>
     `;
@@ -2905,16 +2928,28 @@ function boot({ inIframe = false } = {}) {
     const t = state.currentThread;
     if (!t) return `<div class="muted">Thread not found.</div>`;
     const meta = t.meta || {};
-    const elSummary = `<${esc(meta.tag || '?')}>${meta.text ? ` “${esc(meta.text.slice(0, 60))}${meta.text.length > 60 ? '…' : ''}”` : ''}`;
+    const hasPin = !!(meta.selector && meta.tag);
+    const elSummary = hasPin
+      ? `<${esc(meta.tag)}>${meta.text ? ` “${esc(meta.text.slice(0, 60))}${meta.text.length > 60 ? '…' : ''}”` : ''}`
+      : '';
     const pageStr = meta.page ? `<div class="muted-s">on <code>${esc(meta.page)}</code></div>` : '';
+    const authed = auth.isAuthed();
+    const pinning = state.pinningThreadNumber && state.pinningThreadNumber === t.issue?.number;
+    const pinBtnLabel = pinning ? 'Picking…' : (hasPin ? 'Re-pin' : 'Pin to element');
     const comments = t.comments || [];
     return `
-      <div class="thread-pin">
+      <div class="thread-pin ${hasPin ? '' : 'unpinned'}">
         <div class="thread-pin-dot"></div>
-        <div>
-          <div class="thread-pin-el">${elSummary}</div>
+        <div class="thread-pin-info">
+          ${hasPin
+            ? `<div class="thread-pin-el">${elSummary}</div>`
+            : `<div class="thread-pin-el empty">Not pinned to an element</div>`}
           ${pageStr}
         </div>
+        ${authed ? `
+          <button class="link-btn sm" data-action="pin-thread" ${pinning ? 'disabled' : ''}>${pinBtnLabel}</button>
+          ${hasPin ? `<button class="link-btn sm" data-action="unpin-thread" title="Remove this pin">Unpin</button>` : ''}
+        ` : ''}
       </div>
       <div class="thread-discussion">
         ${threadComment({ author: t.issue?.user, body: t.initialText, created_at: t.issue?.created_at }, true)}
@@ -3015,7 +3050,6 @@ function boot({ inIframe = false } = {}) {
   // off an AI build whose generated branch is announced back in the thread.
   async function startDiscussion(thenBuild = false) {
     if (!requireAuth('threadList')) return;
-    if (!state.capture) return;
     if (state.newThreadFiling) return;
     const text = state.description.trim();
     if (!text) return;
@@ -3028,14 +3062,21 @@ function boot({ inIframe = false } = {}) {
     state.filing = true;
     renderPanel();
     try {
-      const meta = {
-        selector: state.capture.selector,
-        text: state.capture.text,
-        tag: state.capture.tag,
+      const cap = state.capture;
+      // Meta always records the page; selector/text/tag/bbox are only
+      // present when an element is pinned. Threads can exist without a pin.
+      const meta = cap ? {
+        selector: cap.selector,
+        text: cap.text,
+        tag: cap.tag,
         page: state.currentPath || 'index.html',
-        bbox: state.capture.rect,
+        bbox: cap.rect,
+      } : {
+        page: state.currentPath || 'index.html',
       };
-      const title = (state.capture.text?.slice(0, 60) || `<${state.capture.tag}>`);
+      // Title: pinned element's text → element tag → first line of the message.
+      const title = cap?.text?.slice(0, 60)
+        || (cap ? `<${cap.tag}>` : (text.split('\n')[0].slice(0, 60) || 'Thread'));
       const features = state.pendingFeatureTag ? [state.pendingFeatureTag] : [];
       const issue = await gh.createDiscussionThread(state.token, OWNER, REPONAME, { title, text, meta, features });
       state.threadsLoadedFor = '';       // force reload next time (general threads cache)
@@ -3114,6 +3155,68 @@ function boot({ inIframe = false } = {}) {
       promptText: text,
       capture,
     });
+  }
+
+  // Apply a freshly-picked capture as the pinned element of a thread.
+  // Writes the new meta back to the issue body, updates local state, and
+  // rebroadcasts so the iframe pin overlay picks up the change.
+  async function applyThreadPin(number, capture) {
+    if (!requireAuth('threadView')) return;
+    const t = state.currentThread;
+    if (!t || t.issue?.number !== number) return;
+    const meta = {
+      selector: capture.selector,
+      text: capture.text,
+      tag: capture.tag,
+      page: state.currentPath || 'index.html',
+      bbox: capture.rect,
+    };
+    try {
+      await gh.updateThreadMeta(state.token, OWNER, REPONAME, number, {
+        meta,
+        text: t.initialText || '',
+      });
+      // Reflect locally so the thread view updates without a refetch.
+      t.meta = meta;
+      // Invalidate list caches so a trip back to threadList / featurePage
+      // reloads the updated meta.
+      state.threadsLoadedFor = '';
+      state.viewingFeatureLoadedFor = '';
+      // Update the in-memory threads list so iframe pins reflect the change
+      // without a full refetch round-trip.
+      const listEntry = state.threads.find((th) => th.number === number);
+      if (listEntry) listEntry.meta = meta;
+      broadcastThreadsToPreview();
+    } catch (err) {
+      state.threadsError = String(err?.message || err);
+    } finally {
+      renderPanel();
+    }
+  }
+
+  // Strip the pinned element from a thread (keeps page + message).
+  async function unpinThread() {
+    if (!requireAuth('threadView')) return;
+    const t = state.currentThread;
+    if (!t?.issue) return;
+    const number = t.issue.number;
+    const meta = { page: t.meta?.page || state.currentPath || 'index.html' };
+    try {
+      await gh.updateThreadMeta(state.token, OWNER, REPONAME, number, {
+        meta,
+        text: t.initialText || '',
+      });
+      t.meta = meta;
+      state.threadsLoadedFor = '';
+      state.viewingFeatureLoadedFor = '';
+      const listEntry = state.threads.find((th) => th.number === number);
+      if (listEntry) listEntry.meta = meta;
+      broadcastThreadsToPreview();
+    } catch (err) {
+      state.threadsError = String(err?.message || err);
+    } finally {
+      renderPanel();
+    }
   }
 
   async function postThreadReply() {
@@ -3663,6 +3766,15 @@ function boot({ inIframe = false } = {}) {
     on('[data-action="post-thread-reply"]', 'click', postThreadReply);
     on('[data-action="promote-thread"]', 'click', promoteThread);
     on('[data-action="close-thread"]', 'click', closeThread);
+    on('[data-action="pin-thread"]', 'click', () => {
+      if (!requireAuth('threadView')) return;
+      const t = state.currentThread;
+      if (!t?.issue) return;
+      state.pinningThreadNumber = t.issue.number;
+      renderPanel(); // show "Picking…" state on the button
+      enterPickMode();
+    });
+    on('[data-action="unpin-thread"]', 'click', unpinThread);
 
     // Feature
     on('[data-action="refine"]', 'click', () => {
@@ -3867,20 +3979,31 @@ function boot({ inIframe = false } = {}) {
     if (isOurs(e.target)) return;
     e.preventDefault(); e.stopPropagation();
     const el = e.target; const r = el.getBoundingClientRect();
-    state.capture = {
+    const capture = {
       tag: el.tagName.toLowerCase(),
       selector: cssPath(el),
       text: (el.innerText || '').trim().slice(0, 200),
       rect: { x: r.left, y: r.top, w: r.width, h: r.height },
       url: location.href,
     };
+    // If the pick was initiated from the thread view's "Pin to element"
+    // affordance, route the capture straight to updating that thread's meta
+    // rather than populating state.capture (which drives the propose flow).
+    const pinningNumber = state.pinningThreadNumber;
     state.pickMode = false;
     overlayEl?.remove(); overlayEl = null;
     hintEl?.remove(); hintEl = null;
     document.removeEventListener('mousemove', onPickHover, true);
     document.removeEventListener('click', onPickClick, true);
     document.removeEventListener('keydown', onPickKey, true);
-    openPanel();
+    if (pinningNumber) {
+      state.pinningThreadNumber = null;
+      openPanel();            // re-open the panel on threadView
+      applyThreadPin(pinningNumber, capture).catch(() => {});
+    } else {
+      state.capture = capture;
+      openPanel();
+    }
   }
   function onPickKey(e) { if (e.key === 'Escape') exitPickMode(); }
   function isOurs(el) { return host.contains(el) || el === host; }
