@@ -1489,7 +1489,9 @@ function boot({ inIframe = false } = {}) {
     open: false,
 
     // Navigation
-    screen: 'browse',       // browse | features | propose | feature | ai | threadList | threadView | signIn | devicePending | keyPrompt | settings
+    screen: 'features',     // features | browse | propose | feature | ai | threadList | threadView | signIn | devicePending | keyPrompt | settings
+                            // Features is the home — everything lives inside a feature (threads, branches, proposals).
+                            // 'browse' remains as a flat-branch-list fallback reachable via the phylogeny or feature pages.
     backStack: [],          // array of { screen, ctx }
     pendingIntent: null,    // { afterSignIn: 'navigateToX' } for interstitials
 
@@ -1917,6 +1919,11 @@ function boot({ inIframe = false } = {}) {
     if (state.token && configOK()) {
       loadThreads().catch(() => {});
     }
+    // Load features (topic scopes) for the home screen. Cheap: single
+    // labels API call. Works unauth'd too on public repos.
+    if (configOK()) {
+      loadFeatures().catch(() => {});
+    }
   }
   function closePanel() {
     state.open = false;
@@ -1942,7 +1949,7 @@ function boot({ inIframe = false } = {}) {
   function goBack() {
     const prev = state.backStack.pop();
     if (prev) { state.screen = prev.screen; }
-    else state.screen = 'browse';
+    else state.screen = 'features';
     renderPanel();
   }
 
@@ -2262,14 +2269,6 @@ function boot({ inIframe = false } = {}) {
         <div>
           <div class="nav-card-title">Features</div>
           <div class="muted-s">Topic scopes — like subreddits — that group threads and branches</div>
-        </div>
-        <div class="nav-card-chev">→</div>
-      </button>
-      <button class="nav-card" data-action="goto-threads">
-        <div class="nav-card-mark"></div>
-        <div>
-          <div class="nav-card-title">Threads</div>
-          <div class="muted-s">Conversations pinned to elements on this page</div>
         </div>
         <div class="nav-card-chev">→</div>
       </button>
@@ -3577,7 +3576,7 @@ function boot({ inIframe = false } = {}) {
       else if (intent === 'build') beginFirstAiTurn();
       else if (intent === 'start-and-build') startDiscussion(true);
       else if (intent === 'thread-build') buildFromThread();
-      else navigate('browse', { reset: true });
+      else navigate('features', { reset: true });
     });
 
     // Settings
@@ -3771,7 +3770,8 @@ function boot({ inIframe = false } = {}) {
           const intent = state.pendingIntent; state.pendingIntent = null;
           if (intent === 'propose') navigate('propose', { reset: true });
           else if (intent === 'refine') startRefine();
-          else navigate('browse', { reset: true });
+          else if (intent === 'features') { navigate('features', { reset: true }); loadFeatures(); }
+          else navigate('features', { reset: true });
           return;
         }
       } catch (err) {
