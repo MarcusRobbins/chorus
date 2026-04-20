@@ -30,12 +30,18 @@ async function ensureThree() {
   CSS3DObject = addon.CSS3DObject;
 }
 
-// Card geometry in world units. Aspect ~16:10, generous gaps so the grid
-// feels airy at zoom-out.
+// Card geometry in world units. Aspect ~16:10.
+//
+// Branches stack on the Z axis (into the screen), not the Y axis —
+// "vertical slices" in the 3D sense. Each branch deeper in the stack is
+// offset slightly on Y too so it peeks out from behind the one in front
+// (otherwise we'd just see the front branch and everything else would be
+// fully occluded). Pages still spread horizontally on X.
 const CARD_W = 1280;
 const CARD_H = 800;
 const COL_GAP = 360;
-const ROW_GAP = 240;
+const BRANCH_Z_GAP = 520;   // each deeper branch is this far back
+const BRANCH_Y_FAN = 90;    // and this far up, so it peeks out
 const CAMERA_FOV = 50;
 const CAMERA_Z_MIN = 400;
 const CAMERA_Z_MAX = 40000;
@@ -95,9 +101,14 @@ export async function createCanvas({
   const cards = [];
 
   function cellPosition(row, col) {
+    // Columns fan out horizontally, centered on x=0.
     const x = (col - (cols.length - 1) / 2) * (CARD_W + COL_GAP);
-    const y = ((rows.length - 1) / 2 - row) * (CARD_H + ROW_GAP);
-    return { x, y };
+    // Branches stack in depth. Front branch (row 0) at z=0, each deeper
+    // branch further back and a bit higher so it pokes out above the
+    // front one.
+    const z = -row * BRANCH_Z_GAP;
+    const y = row * BRANCH_Y_FAN;
+    return { x, y, z };
   }
 
   // Re-emit positions for every card. Called after cols grows so existing
@@ -105,7 +116,7 @@ export async function createCanvas({
   function layoutCards() {
     for (const c of cards) {
       const pos = cellPosition(c.row, c.col);
-      c.obj.position.set(pos.x, pos.y, 0);
+      c.obj.position.set(pos.x, pos.y, pos.z);
     }
   }
 
@@ -145,7 +156,7 @@ export async function createCanvas({
 
     const obj = new CSS3DObject(el);
     const pos = cellPosition(row, col);
-    obj.position.set(pos.x, pos.y, 0);
+    obj.position.set(pos.x, pos.y, pos.z);
     scene.add(obj);
 
     return { branch, path, row, col, el, hdr, iframe, obj };
@@ -273,17 +284,32 @@ export async function createCanvas({
     const aspect = window.innerWidth / window.innerHeight;
     const zForH = (CARD_H * padding) / (2 * Math.tan(fovRad / 2));
     const zForW = (CARD_W * padding) / (2 * Math.tan(fovRad / 2) * aspect);
-    startAnim(card.obj.position.x, card.obj.position.y, Math.max(zForH, zForW), 650);
+    const distance = Math.max(zForH, zForW);
+    // Camera sits IN FRONT of the card's own Z plane (plus a bit of a
+    // fan offset in Y so taller rows stay framed).
+    startAnim(
+      card.obj.position.x,
+      card.obj.position.y,
+      card.obj.position.z + distance,
+      650,
+    );
   }
 
-  function flyToAll(padding = 1.18) {
+  function flyToAll(padding = 1.25) {
+    // Frame the whole grid from just in front of the front row (z=0).
+    // The depth stack naturally shows behind as perspective distance.
     const totalW = cols.length * CARD_W + Math.max(0, cols.length - 1) * COL_GAP;
-    const totalH = rows.length * CARD_H + Math.max(0, rows.length - 1) * ROW_GAP;
+    // Vertical extent covers the card height plus all the Y fan offsets.
+    const totalFanH = CARD_H + Math.max(0, rows.length - 1) * BRANCH_Y_FAN;
+    // Centre of the Y fan — so all branches are vertically centred in view.
+    const centerY = ((rows.length - 1) * BRANCH_Y_FAN) / 2;
     const fovRad = (camera.fov * Math.PI) / 180;
     const aspect = window.innerWidth / window.innerHeight;
-    const zForH = (totalH * padding) / (2 * Math.tan(fovRad / 2));
+    const zForH = (totalFanH * padding) / (2 * Math.tan(fovRad / 2));
     const zForW = (totalW * padding) / (2 * Math.tan(fovRad / 2) * aspect);
-    startAnim(0, 0, Math.max(zForH, zForW, 2500), 800);
+    const distance = Math.max(zForH, zForW, 2500);
+    // Camera in front of the front row (z=0) by `distance`.
+    startAnim(0, centerY, distance, 800);
   }
 
   // Link-click message handler. Inner chorus in any canvas iframe sends a
