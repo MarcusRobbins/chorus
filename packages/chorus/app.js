@@ -1158,6 +1158,7 @@ const CSS_TEXT = `
   }
   .lightbox-close {
     position: absolute; top: 16px; right: 20px;
+    z-index: 2;             /* sit above the .lightbox-img, which comes later in source order */
     width: 36px; height: 36px;
     background: rgba(255, 255, 255, 0.15);
     color: #fff;
