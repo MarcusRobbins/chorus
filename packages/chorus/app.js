@@ -975,6 +975,61 @@ const CSS_TEXT = `
     margin-top: 2px;
   }
 
+  /* Feature detail page header */
+  .feature-header {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-bg-subtle);
+    margin-bottom: 10px;
+  }
+  .feature-header-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .feature-swatch.lg {
+    width: 14px; height: 14px;
+  }
+  .feature-name-lg {
+    font-family: var(--font-mono);
+    font-size: 14px; font-weight: 600;
+    color: var(--c-text);
+    letter-spacing: -0.01em;
+  }
+  .feature-header-desc {
+    font-size: 12px; color: var(--c-text-muted);
+    line-height: 1.5;
+  }
+
+  /* Feature chip (used in propose to show the in-feature context) */
+  .feature-chip-row {
+    display: flex; align-items: center; gap: 8px;
+    margin: 4px 0 8px;
+  }
+  .feature-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 6px 3px 8px;
+    border-radius: 999px;
+    background: var(--c-accent-bg);
+    color: var(--c-accent-fg, var(--c-accent));
+    font-size: 11.5px;
+  }
+  .feature-chip code {
+    background: transparent; padding: 0; font-size: 11.5px;
+    color: inherit;
+  }
+  .feature-chip-x {
+    background: transparent; border: none; cursor: pointer;
+    color: inherit; font: inherit; font-size: 11px;
+    padding: 0 2px; border-radius: 999px;
+    opacity: 0.7;
+    transition: opacity var(--t-fast), background var(--t-fast);
+  }
+  .feature-chip-x:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.05);
+  }
+
   /* Empty state card */
   .empty-state {
     padding: 20px 18px; text-align: left;
@@ -1568,6 +1623,18 @@ function boot({ inIframe = false } = {}) {
     featuresCreateDraft: { name: '', description: '' },
     featuresCreating: false,
     featuresCreateError: null,
+
+    // Feature detail page ("subreddit" page): a single feature's threads.
+    viewingFeature: null,               // { name, rawName, description, color } | null
+    viewingFeatureThreads: [],          // threads tagged with this feature
+    viewingFeatureThreadsLoading: false,
+    viewingFeatureThreadsError: null,
+    viewingFeatureLoadedFor: '',        // staleness key (feature name)
+
+    // When the user hits "+ New thread" from a feature page we carry the
+    // feature name through the propose flow so the created thread is tagged
+    // with it. Cleared after the thread is created (or cancelled).
+    pendingFeatureTag: null,            // string | null (feature name)
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -2151,6 +2218,9 @@ function boot({ inIframe = false } = {}) {
     switch (state.screen) {
       case 'browse':        return `${esc(REPO)}`;
       case 'features':      return 'Features';
+      case 'featurePage':   return state.viewingFeature
+                              ? `<code>${esc(state.viewingFeature.name)}</code>`
+                              : 'Feature';
       case 'propose':       return 'Start a thread';
       case 'feature':       return `<code>${esc(state.featureBranch || '…')}</code>`;
       case 'ai':            return state.ai?.status === 'running'
@@ -2177,6 +2247,7 @@ function boot({ inIframe = false } = {}) {
       switch (state.screen) {
         case 'browse':        return browseHtml();
         case 'features':      return featuresHtml();
+        case 'featurePage':   return featurePageHtml();
         case 'propose':       return proposeHtml();
         case 'feature':       return featureHtml();
         case 'ai':            return aiHtml();
@@ -2199,6 +2270,7 @@ function boot({ inIframe = false } = {}) {
     switch (state.screen) {
       case 'browse':        html = browseActions(); break;
       case 'features':      html = featuresActions(); break;
+      case 'featurePage':   html = featurePageActions(); break;
       case 'propose':       html = proposeActions(); break;
       case 'feature':       html = featureActions(); break;
       case 'ai':            html = aiActions(); break;
@@ -2291,11 +2363,9 @@ function boot({ inIframe = false } = {}) {
   }
 
   function browseActions() {
-    return `
-      <div class="secondary">
-        <button data-action="refresh-branches">Refresh</button>
-      </div>
-    `;
+    // No refresh button — branches are reloaded automatically on panel
+    // open and after mutations (merges / AI commits).
+    return '';
   }
 
   async function fetchBranches() {
@@ -2380,8 +2450,17 @@ function boot({ inIframe = false } = {}) {
     const captureText = capture
       ? `<${capture.tag}> ${capture.selector}${capture.text ? ` — "${capture.text.slice(0, 60)}"` : ''}`
       : 'nothing selected';
+    const featureTag = state.pendingFeatureTag;
     return `
       <p class="muted">Drop a comment pinned to an element. From inside the thread, any reply can trigger an AI build on its own branch.</p>
+      ${featureTag ? `
+        <div class="feature-chip-row">
+          <span class="muted-s">in feature:</span>
+          <span class="feature-chip"><code>${esc(featureTag)}</code>
+            <button class="feature-chip-x" data-action="clear-feature-tag" title="Remove feature tag">✕</button>
+          </span>
+        </div>
+      ` : ''}
       <div>
         <div class="muted-s" style="margin-bottom:6px;">Selected element</div>
         <div class="${captureClass}">${esc(captureText)}</div>
@@ -2607,10 +2686,9 @@ function boot({ inIframe = false } = {}) {
 
   function featuresActions() {
     const authed = auth.isAuthed();
+    // No refresh button — features reload on panel open and after create.
     return `
-      <div class="secondary">
-        <button data-action="features-refresh">Refresh</button>
-      </div>
+      <div class="secondary"></div>
       <button class="primary" data-action="features-open-create" ${authed ? '' : 'disabled title="Sign in to create features"'}>
         + New feature
       </button>
@@ -2678,6 +2756,94 @@ function boot({ inIframe = false } = {}) {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // SCREEN: Feature page (a single feature's threads — "subreddit" page)
+  // ═══════════════════════════════════════════════════════════════
+  function featurePageHtml() {
+    const f = state.viewingFeature;
+    if (!f) {
+      return `<div class="muted">Feature not found.</div>`;
+    }
+    const color = (f.color || '64748b').replace(/^#/, '');
+    const threads = state.viewingFeatureThreads;
+    const loading = state.viewingFeatureThreadsLoading && !threads.length;
+    const empty = !loading && !threads.length && !state.viewingFeatureThreadsError;
+
+    return `
+      <div class="feature-header">
+        <div class="feature-header-row">
+          <span class="feature-swatch lg" style="background:#${esc(color)}"></span>
+          <span class="feature-name-lg">${esc(f.name)}</span>
+        </div>
+        ${f.description ? `<div class="feature-header-desc">${esc(f.description)}</div>` : ''}
+      </div>
+
+      ${state.viewingFeatureThreadsError ? `<div class="err">${esc(state.viewingFeatureThreadsError)}</div>` : ''}
+
+      ${loading ? `
+        <div class="thread-list">
+          <div class="skeleton" style="height:60px;"></div>
+          <div class="skeleton" style="height:60px;"></div>
+        </div>
+      ` : ''}
+
+      ${empty ? `
+        <div class="empty-state">
+          <div class="empty-state-title">No threads in this feature yet</div>
+          <div class="muted-s">Pick an element on the page and start a thread — it'll be tagged with <code>${esc(f.name)}</code>.</div>
+        </div>
+      ` : ''}
+
+      ${!loading && threads.length ? `
+        <div class="thread-list">
+          ${threads.map(threadListItem).join('')}
+        </div>
+      ` : ''}
+    `;
+  }
+
+  function featurePageActions() {
+    const authed = auth.isAuthed();
+    return `
+      <div class="secondary"></div>
+      <button class="primary" data-action="feature-new-thread" ${authed ? '' : 'disabled title="Sign in to start a thread"'}>
+        + New thread
+      </button>
+    `;
+  }
+
+  function openFeature(feature) {
+    if (!feature) return;
+    state.viewingFeature = feature;
+    state.viewingFeatureThreads = [];
+    state.viewingFeatureThreadsError = null;
+    state.viewingFeatureLoadedFor = '';
+    navigate('featurePage');
+    loadFeatureThreads();
+  }
+
+  async function loadFeatureThreads({ force = false } = {}) {
+    const f = state.viewingFeature;
+    if (!f) return;
+    const key = f.name;
+    if (!force && state.viewingFeatureLoadedFor === key && state.viewingFeatureThreads.length) return;
+    state.viewingFeatureThreadsLoading = true;
+    state.viewingFeatureThreadsError = null;
+    renderPanel();
+    try {
+      const threads = await gh.listDiscussionThreads(state.token, OWNER, REPONAME, {
+        featureName: f.name,
+      });
+      state.viewingFeatureThreads = threads;
+      state.viewingFeatureLoadedFor = key;
+    } catch (err) {
+      state.viewingFeatureThreadsError = String(err?.message || err);
+    } finally {
+      state.viewingFeatureThreadsLoading = false;
+      if (state.screen === 'featurePage') renderPanel();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // SCREEN: Thread list (element-pinned discussion threads)
   // ═══════════════════════════════════════════════════════════════
   function threadListHtml() {
@@ -2721,10 +2887,10 @@ function boot({ inIframe = false } = {}) {
   }
 
   function threadListActions() {
+    // No refresh button — threads are reloaded on panel open and after
+    // any create/close/promote mutation.
     return `
-      <div class="secondary">
-        <button data-action="refresh-threads">Refresh</button>
-      </div>
+      <div class="secondary"></div>
       <button class="primary" data-action="goto-propose-discuss">+ New thread</button>
     `;
   }
@@ -2870,8 +3036,12 @@ function boot({ inIframe = false } = {}) {
         bbox: state.capture.rect,
       };
       const title = (state.capture.text?.slice(0, 60) || `<${state.capture.tag}>`);
-      const issue = await gh.createDiscussionThread(state.token, OWNER, REPONAME, { title, text, meta });
-      state.threadsLoadedFor = ''; // force reload next time
+      const features = state.pendingFeatureTag ? [state.pendingFeatureTag] : [];
+      const issue = await gh.createDiscussionThread(state.token, OWNER, REPONAME, { title, text, meta, features });
+      state.threadsLoadedFor = '';       // force reload next time (general threads cache)
+      state.viewingFeatureLoadedFor = ''; // force reload feature page threads too
+      const createdInFeature = state.pendingFeatureTag;
+      state.pendingFeatureTag = null;     // consumed
       // Remember the element + instruction BEFORE we wipe them; if we're
       // building, we'll hand them to beginFirstAiTurn.
       const aiCapture = state.capture;
@@ -3341,7 +3511,6 @@ function boot({ inIframe = false } = {}) {
     });
 
     // Features
-    on('[data-action="features-refresh"]', 'click', () => loadFeatures({ force: true }));
     on('[data-action="features-open-create"]', 'click', () => {
       if (!requireAuth('features')) return;
       state.featuresCreateOpen = true;
@@ -3359,6 +3528,10 @@ function boot({ inIframe = false } = {}) {
       renderPanel();
     });
     on('[data-action="features-submit-create"]', 'click', submitCreateFeature);
+    on('[data-action="clear-feature-tag"]', 'click', () => {
+      state.pendingFeatureTag = null;
+      renderPanel();
+    });
     const featuresSearchInput = panelEl.querySelector('[data-field="features-search"]');
     featuresSearchInput?.addEventListener('input', (e) => {
       state.featuresSearch = e.target.value;
@@ -3394,22 +3567,28 @@ function boot({ inIframe = false } = {}) {
     });
     panelEl.querySelectorAll('[data-action="open-feature"]').forEach((el) => {
       el.addEventListener('click', () => {
-        // Feature detail page is the next build step — for now, log and
-        // no-op. Leaving the click hooked up means the hit-target is live
-        // so users feel the card is interactive.
         const name = el.dataset.feature;
-        if (DEBUG) console.log('[chorus] open feature (not yet implemented):', name);
+        const feature = state.features.find((f) => f.name === name);
+        if (feature) openFeature(feature);
       });
+    });
+
+    // Feature page: "+ New thread" → propose with the current feature
+    // carried through so the resulting thread is tagged.
+    on('[data-action="feature-new-thread"]', 'click', () => {
+      if (!requireAuth('propose')) return;
+      if (state.viewingFeature) state.pendingFeatureTag = state.viewingFeature.name;
+      if (!state.capture) {
+        navigate('propose');
+        setTimeout(() => enterPickMode(), 10);
+      } else {
+        navigate('propose');
+      }
     });
 
     // Browse (list view)
     panelEl.querySelectorAll('.branch').forEach((el) => {
       el.addEventListener('click', () => selectBranch(el.dataset.branch));
-    });
-    on('[data-action="refresh-branches"]', 'click', () => {
-      fetchBranches();
-      phyLoadedForBranchSet = ''; // force phylogeny reload
-      refreshPhylogeny();
     });
     on('[data-action="goto-propose"]', 'click', () => {
       if (!requireAuth('propose')) return;
@@ -3442,11 +3621,13 @@ function boot({ inIframe = false } = {}) {
 
     // Discussions
     on('[data-action="goto-features"]', 'click', () => {
+      state.pendingFeatureTag = null; // leaving any specific feature context
       navigate('features');
       loadFeatures();
     });
     on('[data-action="goto-features-menu"]', 'click', () => {
       state.menuOpen = false;
+      state.pendingFeatureTag = null;
       navigate('features');
       loadFeatures();
     });
@@ -3454,7 +3635,6 @@ function boot({ inIframe = false } = {}) {
       navigate('threadList');
       loadThreads();
     });
-    on('[data-action="refresh-threads"]', 'click', () => loadThreads({ force: true }));
     on('[data-action="goto-propose-discuss"]', 'click', () => {
       if (!requireAuth('propose')) return;
       if (!state.capture) {

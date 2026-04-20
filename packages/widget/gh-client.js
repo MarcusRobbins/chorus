@@ -132,11 +132,24 @@ export function stripThreadMeta(body) {
 }
 
 // List open discussion threads for this repo. Uses GitHub's label filter.
-// Optionally narrow to a specific page path — filtering is client-side
-// because the path lives in the body metadata, not a label.
-export async function listDiscussionThreads(token, owner, repo, { page, state = 'open' } = {}) {
+// Optionally narrow to a specific page path (client-side filter — path lives
+// in body metadata, not a label) and/or a specific feature (server-side AND
+// filter via an additional chorus:feature:<name> label).
+export async function listDiscussionThreads(
+  token, owner, repo,
+  { page, state = 'open', featureName } = {},
+) {
   const qs = new URLSearchParams();
-  qs.set('labels', THREAD_LABEL);
+  const labels = [THREAD_LABEL];
+  if (featureName) {
+    // Inline to avoid forward reference to featureLabelName (same file,
+    // defined later — would be hoisted as a function decl, but keeping
+    // this self-contained is clearer).
+    const slug = String(featureName).toLowerCase().trim()
+      .replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+    if (slug) labels.push(`chorus:feature:${slug}`);
+  }
+  qs.set('labels', labels.join(','));
   qs.set('state', state);
   qs.set('per_page', '100');
   const issues = await gh(token, `/repos/${owner}/${repo}/issues?${qs.toString()}`);
@@ -162,18 +175,26 @@ export async function listDiscussionThreads(token, owner, repo, { page, state = 
 
 // Create a new discussion thread pinned to an element. Returns the full
 // issue object (caller typically just needs .number).
-export async function createDiscussionThread(token, owner, repo, { title, text, meta }) {
+// Optionally attach feature tags (array of feature names). Features must
+// already exist; if a name doesn't resolve to a label, GitHub will 422 and
+// we'll throw. Caller should ensure the feature exists first (or create it).
+export async function createDiscussionThread(token, owner, repo, { title, text, meta, features = [] }) {
   // Ensure the label exists; GitHub silently succeeds if it already does.
   // We don't await this — if creation races, the issue is still valid;
   // the label just won't be attached and the thread won't show in the list
   // until applied.
   safeEnsureLabel(token, owner, repo, THREAD_LABEL, '4f46e5', 'Chorus element-pinned discussion');
+  const labels = [THREAD_LABEL];
+  for (const name of features || []) {
+    const slug = slugifyFeatureName(name);
+    if (slug) labels.push(featureLabelName(slug));
+  }
   return gh(token, `/repos/${owner}/${repo}/issues`, {
     method: 'POST',
     body: JSON.stringify({
       title: title || 'Discussion',
       body: buildThreadBody({ meta, text }),
-      labels: [THREAD_LABEL],
+      labels,
     }),
   });
 }
