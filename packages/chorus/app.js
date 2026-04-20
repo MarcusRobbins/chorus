@@ -1146,6 +1146,11 @@ const CSS_TEXT = `
     display: flex; align-items: center; justify-content: center;
     z-index: 2147483647;
     padding: 24px;
+    /* The shadow host is pointer-events:none so chorus doesn't block the
+       underlying site when nothing's open — which means every interactive
+       element inside has to opt back in. Without this, clicks on the close
+       button pass straight through to whatever's behind chorus. */
+    pointer-events: auto;
     animation: chorusFadeIn 120ms ease;
   }
   @keyframes chorusFadeIn { from { opacity: 0; } to { opacity: 1; } }
