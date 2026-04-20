@@ -3677,16 +3677,12 @@ function boot({ inIframe = false } = {}) {
     });
 
     // Feature page: "+ New thread" → propose with the current feature
-    // carried through so the resulting thread is tagged.
+    // carried through so the resulting thread is tagged. Picking is
+    // optional; we don't auto-enter pick mode.
     on('[data-action="feature-new-thread"]', 'click', () => {
       if (!requireAuth('propose')) return;
       if (state.viewingFeature) state.pendingFeatureTag = state.viewingFeature.name;
-      if (!state.capture) {
-        navigate('propose');
-        setTimeout(() => enterPickMode(), 10);
-      } else {
-        navigate('propose');
-      }
+      navigate('propose');
     });
 
     // Browse (list view)
@@ -3740,13 +3736,10 @@ function boot({ inIframe = false } = {}) {
     });
     on('[data-action="goto-propose-discuss"]', 'click', () => {
       if (!requireAuth('propose')) return;
-      if (!state.capture) {
-        // No element picked yet — nudge them into picker mode on propose.
-        navigate('propose');
-        setTimeout(() => enterPickMode(), 10);
-      } else {
-        navigate('propose');
-      }
+      // Picking is optional on the propose screen; don't auto-enter the
+      // picker here either. Users can pin from propose or later from the
+      // thread view.
+      navigate('propose');
     });
     panelEl.querySelectorAll('[data-action="open-thread"]').forEach((el) => {
       el.addEventListener('click', () => openThread(Number(el.dataset.number)));
