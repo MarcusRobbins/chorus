@@ -114,9 +114,9 @@ export async function createCanvas({
     const iframe = document.createElement('iframe');
     iframe.src = previewUrlFor(b.name);
     iframe.className = 'chorus-canvas-card-frame';
-    // pointer-events off: pan drags should bubble to our handler rather
-    // than being swallowed by the iframe's own scrolling.
-    iframe.style.pointerEvents = 'none';
+    // pointer-events is set via CSS, NOT inline. That lets the .active
+    // class on a card flip pointer-events: auto on its iframe (an inline
+    // style would beat the CSS specificity and the toggle wouldn't work).
     el.appendChild(iframe);
 
     // Transparent hit overlay for the "click this card to fly to it"
@@ -135,6 +135,26 @@ export async function createCanvas({
 
     return { branch: b, el, obj, click };
   });
+
+  // Which card (if any) is currently in interactive mode. While active:
+  //   - its .card-click overlay is display:none so the iframe receives events
+  //   - its .card iframe has pointer-events:auto (click/scroll/type into it)
+  //   - a subtle accent ring highlights the card as "focused"
+  // All managed via a .active class on the card element — CSS does the rest.
+  let activeCard = null;
+  function setActiveCard(next) {
+    if (activeCard === next) return;
+    if (activeCard) activeCard.el.classList.remove('active');
+    activeCard = next;
+    if (activeCard) activeCard.el.classList.add('active');
+    updateHint();
+  }
+  function updateHint() {
+    hint.textContent = activeCard
+      ? 'Interacting with ' + activeCard.branch.name + ' · Esc or click outside to exit'
+      : 'Drag to pan · Wheel to zoom · Click a card to fly in and interact';
+  }
+  updateHint();
 
   // Unified pointer handling: pan + click-to-fly disambiguated by how far
   // the pointer moved between down and up. Below MOVE_THRESHOLD px = click.
@@ -171,14 +191,25 @@ export async function createCanvas({
     const wasClick = !pointer.panning;
     const target = pointer.target;
     pointer = null;
-    if (wasClick) {
-      // If the click landed on a card's hit overlay, fly to it.
-      const hit = target?.closest?.('.chorus-canvas-card-click');
-      if (hit) {
-        const card = cards.find((c) => c.click === hit);
-        if (card) flyToCard(card);
+    if (!wasClick) return;
+    // Click on active card's own surface (e.g. its header) while active:
+    // ignore. The iframe itself consumes events directly; this only fires
+    // for non-iframe parts like the card header.
+    if (activeCard && target?.closest?.('.chorus-canvas-card.active')) return;
+    // Click on any card's hit overlay → fly + activate (swaps active if
+    // another card was already active).
+    const hit = target?.closest?.('.chorus-canvas-card-click');
+    if (hit) {
+      const card = cards.find((c) => c.click === hit);
+      if (card) {
+        flyToCard(card);
+        setActiveCard(card);
       }
+      return;
     }
+    // Clicked empty background. If a card is active, deactivate it
+    // (return to pan-and-pick mode). Otherwise do nothing.
+    if (activeCard) setActiveCard(null);
   };
   rendererEl.addEventListener('pointerdown', onPointerDown);
   rendererEl.addEventListener('pointermove', onPointerMove);
@@ -275,7 +306,15 @@ export async function createCanvas({
   };
   window.addEventListener('resize', onResize);
 
-  const onKey = (e) => { if (e.key === 'Escape') { destroy(); onClose?.(); } };
+  const onKey = (e) => {
+    if (e.key !== 'Escape') return;
+    // Esc exits active mode first (so the user can get out of an iframe
+    // without closing the whole canvas). Only when already in pan mode
+    // does Esc close the canvas.
+    if (activeCard) { setActiveCard(null); return; }
+    destroy();
+    onClose?.();
+  };
   document.addEventListener('keydown', onKey);
 
   // Give iframes a beat to start loading before the fit animation kicks in.

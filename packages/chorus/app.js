@@ -1266,6 +1266,21 @@ const CSS_TEXT = `
   .chorus-canvas-card-click:hover {
     background: rgba(79, 70, 229, 0.04);
   }
+  /* Active / focused card — iframe becomes interactive, click-overlay
+     steps aside, and a subtle accent ring highlights which card you're
+     "in". Esc or a click on the canvas background pops back out. */
+  .chorus-canvas-card.active {
+    box-shadow:
+      0 40px 100px rgba(0, 0, 0, 0.65),
+      0 18px 44px rgba(0, 0, 0, 0.4),
+      0 0 0 3px rgba(79, 70, 229, 0.75);
+  }
+  .chorus-canvas-card.active .chorus-canvas-card-frame {
+    pointer-events: auto;
+  }
+  .chorus-canvas-card.active .chorus-canvas-card-click {
+    display: none;
+  }
 
   /* Per-comment action row + pin/branch badges */
   .comment-actions {
