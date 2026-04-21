@@ -44,7 +44,7 @@ export async function createBoard({
   const hint = document.createElement('div');
   hint.className = 'chorus-board-hint';
   hint.textContent =
-    'All pages on ' + branchName + ' · Drag to pan · Wheel to zoom · Click a link to spawn a new tile';
+    branchName + ' · drag background or hold Space to pan · wheel / Ctrl-wheel to zoom · links spawn tiles';
   container.appendChild(hint);
 
   // d3-zoom applies a translate+scale transform to this inner wrapper.
@@ -97,26 +97,84 @@ export async function createBoard({
 
   addPage(initialPath || 'index.html');
 
-  // d3-zoom — pan on drag, wheel to zoom. The filter lets us restrict
-  // drag-starts so clicking through into an iframe still works (d3 would
-  // otherwise swallow pointerdowns as the start of a pan).
+  // Hold-space-to-pan — the universal hand-tool modifier. When Space is
+  // held we add .pan-mode to the container; the stylesheet flips iframe
+  // pointer-events to none so drag / wheel events reach the canvas
+  // handler instead of being swallowed by the iframe. The d3-zoom filter
+  // below is relaxed to allow events that start inside a tile while in
+  // pan mode.
+  let spaceHeld = false;
+  let middleMouseHeld = false;   // alternate pan modifier
+  function panOverride() { return spaceHeld || middleMouseHeld; }
+  function setPanMode(on) {
+    if (on) container.classList.add('pan-mode');
+    else container.classList.remove('pan-mode');
+  }
+
+  // d3-zoom — pan on drag, wheel to zoom. Filter:
+  //   - Always allow wheel (needed for zoom-over-background)
+  //   - Always allow Ctrl/Cmd+wheel (zoom even when over a tile)
+  //   - Block clicks on chrome
+  //   - Block iframe-starting events UNLESS panOverride() says we're in
+  //     pan mode (Space held or middle-click)
   const zoomBehavior = d3Zoom()
     .scaleExtent([0.1, 3])
     .filter((event) => {
-      if (event.type === 'wheel') return true;
+      if (event.type === 'wheel') {
+        // Ctrl/Cmd + wheel = canvas zoom even over an iframe. Without the
+        // modifier, wheel over an iframe scrolls the iframe (the event
+        // won't even reach us — iframes eat wheel — but we allow this
+        // branch for completeness when wheel reaches the container).
+        return true;
+      }
+      // Middle-click = pan (button 1)
+      if (event.type === 'pointerdown' && event.button === 1) {
+        middleMouseHeld = true;
+        setPanMode(true);
+        return true;
+      }
       const t = event.target;
       if (!t) return false;
-      // Don't start a pan on the close/hint chrome, or inside an iframe.
       if (t === closeBtn || t === hint) return false;
-      if (t.closest && (t.closest('iframe') || t.closest('.chorus-board-close'))) return false;
-      // Allow everything else — background, tile headers, tile surface.
+      if (t.closest && t.closest('.chorus-board-close')) return false;
+      // Iframe-origin events: only allow during pan override.
+      if (!panOverride() && t.closest && t.closest('iframe')) return false;
       return true;
     })
     .on('zoom', (event) => {
       const { x, y, k } = event.transform;
       inner.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')';
+    })
+    .on('end', () => {
+      // Middle-mouse-up ends pan mode. (Space up is handled separately.)
+      if (middleMouseHeld) {
+        middleMouseHeld = false;
+        if (!spaceHeld) setPanMode(false);
+      }
     });
   d3Select(container).call(zoomBehavior);
+
+  // Space-to-pan key handling. preventDefault on keydown suppresses page
+  // scroll; we also skip toggling when the user is typing into a form
+  // field so accidental pan-modes while editing don't ambush them.
+  const onKeyDown = (e) => {
+    if (e.code !== 'Space') return;
+    if (spaceHeld) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    spaceHeld = true;
+    setPanMode(true);
+    e.preventDefault();
+  };
+  const onKeyUp = (e) => {
+    if (e.code !== 'Space') return;
+    if (!spaceHeld) return;
+    spaceHeld = false;
+    if (!middleMouseHeld) setPanMode(false);
+    e.preventDefault();
+  };
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
 
   // Click a tile header → fly to it. d3's drag-vs-click disambiguation
   // happens inside d3-zoom; a real click (no meaningful drag) fires
@@ -200,6 +258,8 @@ export async function createBoard({
     window.removeEventListener('message', onMessage);
     window.removeEventListener('resize', onResize);
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('keyup', onKeyUp);
     container.remove();
   }
 

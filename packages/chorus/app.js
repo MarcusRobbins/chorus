@@ -1291,6 +1291,21 @@ const CSS_TEXT = `
     animation: chorusFadeIn 160ms ease;
   }
   .chorus-board:active { cursor: grabbing; }
+  /* pan-mode: Space held (or middle-click drag). Flip iframe
+     pointer-events off so pan and wheel events reach the canvas handler
+     instead of being consumed by the iframe. A faint inner ring cues the
+     user that they're in hand-tool mode. */
+  .chorus-board.pan-mode {
+    cursor: grab;
+    box-shadow:
+      0 20px 48px rgba(0, 0, 0, 0.2),
+      inset 0 0 0 2px rgba(255, 255, 255, 0.18);
+  }
+  .chorus-board.pan-mode:active { cursor: grabbing; }
+  .chorus-board.pan-mode .chorus-board-tile-frame,
+  .chorus-board.pan-mode .chorus-board-tile-hdr {
+    pointer-events: none;
+  }
   .chorus-board-inner {
     position: absolute;
     top: 0; left: 0;
