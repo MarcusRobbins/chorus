@@ -246,18 +246,35 @@ export async function createBoard({
   // Initial fit once layout has stabilised.
   setTimeout(() => flyToAll(), 60);
 
-  // Link-click messages from the inner chorus. The normalizer strips the
-  // rawcdn.githack /<owner>/<repo>/<sha>/ prefix off the URL so we end up
-  // with a repo-relative path for previewUrlFor.
+  // Messages from any of our iframes' inner chorus instances:
+  //
+  //   chorus:preview:location — "I'm booted / I just navigated". Use it
+  //     as a reliable ready signal: by the time it fires, bootPreviewMode
+  //     has finished executing and installed its listener. The
+  //     'iframe.load' event in makeTile is too early — chorus is loaded
+  //     inside the iframe by a dynamically-inserted <script type="module">,
+  //     which can finish AFTER iframe.load has already fired. So the
+  //     original postMessage race-lost in some tiles. Re-sending on every
+  //     location event covers both initial boot and in-iframe navigation.
+  //
+  //   chorus:preview:link — "user clicked a same-origin link". Spawn a
+  //     new tile for that page (or fly to the existing one) on this
+  //     branch.
   const onMessage = (e) => {
     const d = e.data;
-    if (!d || d.type !== 'chorus:preview:link') return;
+    if (!d) return;
     const source = tiles.find((t) => t.iframe?.contentWindow === e.source);
     if (!source) return;
-    const path = normalizeLinkToRepoPath(d.href || '', source.path);
-    if (!path) return;
-    const tile = addPage(path);
-    flyToTile(tile);
+    if (d.type === 'chorus:preview:location') {
+      try { e.source.postMessage({ type: 'chorus:parent:intercept-links' }, '*'); } catch {}
+      return;
+    }
+    if (d.type === 'chorus:preview:link') {
+      const path = normalizeLinkToRepoPath(d.href || '', source.path);
+      if (!path) return;
+      const tile = addPage(path);
+      flyToTile(tile);
+    }
   };
   window.addEventListener('message', onMessage);
 

@@ -312,21 +312,32 @@ export async function createCanvas({
     startAnim(0, centerY, distance, 800);
   }
 
-  // Link-click message handler. Inner chorus in any canvas iframe sends a
-  // 'chorus:preview:link' with the absolute URL when a same-origin link
-  // is clicked; we resolve that to a repo-relative path, add a column for
-  // it (or reuse an existing one), and fly to the cell matching the
-  // source card's branch.
+  // Messages from the inner chorus in any canvas iframe:
+  //
+  //   chorus:preview:location — booted/navigated signal. Resend
+  //     intercept-links, because the initial iframe.load-time send races
+  //     against the iframe's own dynamic-module chorus boot and is
+  //     sometimes lost. By the time location fires, the inner listener
+  //     is definitely installed.
+  //
+  //   chorus:preview:link — user clicked a same-origin link. Add column,
+  //     fly to the matching cell.
   const onMessage = (e) => {
     const d = e.data;
-    if (!d || d.type !== 'chorus:preview:link') return;
+    if (!d) return;
     const sourceCard = cards.find((c) => c.iframe?.contentWindow === e.source);
     if (!sourceCard) return;
-    const path = normalizeLinkToRepoPath(d.href || '', sourceCard.path);
-    if (!path) return;
-    const col = addColumn(path);
-    const card = cardAt(sourceCard.row, col);
-    if (card) flyToCard(card);
+    if (d.type === 'chorus:preview:location') {
+      try { e.source.postMessage({ type: 'chorus:parent:intercept-links' }, '*'); } catch {}
+      return;
+    }
+    if (d.type === 'chorus:preview:link') {
+      const path = normalizeLinkToRepoPath(d.href || '', sourceCard.path);
+      if (!path) return;
+      const col = addColumn(path);
+      const card = cardAt(sourceCard.row, col);
+      if (card) flyToCard(card);
+    }
   };
   window.addEventListener('message', onMessage);
 
