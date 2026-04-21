@@ -85,20 +85,17 @@ export async function createBoard({
     el.appendChild(hdr);
 
     const iframe = document.createElement('iframe');
-    iframe.src = previewUrlFor(branchName, path);
     iframe.className = 'chorus-board-tile-frame';
     el.appendChild(iframe);
-
-    // Tell the inner chorus (running inside this iframe's page) to
-    // intercept link clicks so we can spawn new tiles instead of
-    // navigating in place.
-    iframe.addEventListener('load', () => {
-      try {
-        iframe.contentWindow?.postMessage({ type: 'chorus:parent:intercept-links' }, '*');
-      } catch {}
-    });
-
     inner.appendChild(el);
+
+    // Load the page. The "fetch-and-inject via srcdoc" path works even
+    // if the target page doesn't itself embed chorus, because we inject
+    // our own minimal link-click interceptor into the fetched HTML. The
+    // fallback (plain iframe.src + postMessage to any inner chorus) is
+    // only used when CORS blocks the fetch.
+    loadTileContent(iframe, previewUrlFor(branchName, path));
+
     return { path, index, el, hdr, iframe };
   }
 
@@ -301,6 +298,67 @@ export async function createBoard({
   }
 
   return { destroy, flyToTile, flyToAll, addPage };
+}
+
+// Fetch the page cross-origin, inject our own <base> + link interceptor,
+// then drop the result into the iframe via srcdoc. This way link clicks
+// get captured regardless of whether the page itself embeds chorus —
+// most demo sites only include chorus on their home page, not every
+// sub-page, and the board needs interception everywhere.
+//
+// If the fetch fails (no CORS on the host, network error), fall back to
+// iframe.src = url and try to enlist the inner chorus (which works if
+// the page happens to have it). That's the pre-existing behaviour.
+async function loadTileContent(iframe, url) {
+  try {
+    const res = await fetch(url, { mode: 'cors' });
+    if (!res.ok) throw new Error('fetch ' + res.status);
+    const html = await res.text();
+    iframe.srcdoc = injectInterceptor(html, url);
+  } catch (err) {
+    console.warn('[chorus/board] fetch-inject unavailable, falling back to src', url, err?.message || err);
+    iframe.src = url;
+    iframe.addEventListener('load', () => {
+      try { iframe.contentWindow?.postMessage({ type: 'chorus:parent:intercept-links' }, '*'); } catch {}
+    }, { once: true });
+  }
+}
+
+// Wrap the fetched page with:
+//   <base href="<originalUrl>">  — so relative images / CSS / scripts
+//     still resolve to the real origin and render normally.
+//   <script>…</script>           — minimal click-capture script that
+//     preventDefaults same-origin link clicks and postMessages the
+//     target to window.parent (our board).
+//
+// Inserted at the top of <head> (or faked if the page has no head),
+// so our capture listener is attached before any in-page listeners.
+function injectInterceptor(html, baseUrl) {
+  const attrSafe = String(baseUrl).replace(/"/g, '&quot;');
+  const snippet =
+    '<base href="' + attrSafe + '">' +
+    '<script>(function(){' +
+      'document.addEventListener("click",function(e){' +
+        'var a=e.target&&e.target.closest&&e.target.closest("a");' +
+        'if(!a)return;' +
+        'var href=a.getAttribute("href");' +
+        'if(!href||href.charAt(0)==="#"||href.indexOf("javascript:")===0)return;' +
+        'try{' +
+          'var u=new URL(href,document.baseURI);' +
+          'var base=new URL(document.baseURI);' +
+          'if(u.origin!==base.origin)return;' +
+          'e.preventDefault();e.stopPropagation();' +
+          'window.parent.postMessage({type:"chorus:preview:link",href:u.href},"*");' +
+        '}catch(err){}' +
+      '},true);' +
+    '})();</script>';
+  if (/<head[^>]*>/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => m + snippet);
+  }
+  if (/<html[^>]*>/i.test(html)) {
+    return html.replace(/<html[^>]*>/i, (m) => m + '<head>' + snippet + '</head>');
+  }
+  return snippet + html;
 }
 
 function normalizeLinkToRepoPath(fullHref, fallback) {
