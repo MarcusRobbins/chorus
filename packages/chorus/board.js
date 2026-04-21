@@ -22,7 +22,8 @@ const TILE_GAP = 80;
 export async function createBoard({
   hostRoot,           // ShadowRoot to attach the container to
   branchName,         // the branch to board
-  initialPath,        // first page to show
+  pages,              // [string] — page paths to show on open (ordered)
+  initialPath,        // which page to frame after the fit animation
   previewUrlFor,      // (branchName, path) => url
   onClose,            // () => void
 }) {
@@ -52,17 +53,31 @@ export async function createBoard({
   inner.className = 'chorus-board-inner';
   container.appendChild(inner);
 
-  // Tiles are laid out in a horizontal row. tiles[] owns the per-page
-  // state; addPage is idempotent on path, so clicking a link back to a
-  // page we already have just flies there.
+  // Tiles laid out in a grid. Column count is decided once from the
+  // initial page count (sqrt(N) capped at 4) so adding new pages later
+  // via link clicks doesn't reshuffle the layout. New additions append
+  // to the end of the grid flow.
+  const initialPages = Array.isArray(pages) && pages.length ? pages : [initialPath || 'index.html'];
+  const numCols = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(initialPages.length))));
   const tiles = [];
-  function makeTile(path, col) {
+
+  function cellXY(index) {
+    const col = index % numCols;
+    const row = Math.floor(index / numCols);
+    return {
+      x: col * (TILE_W + TILE_GAP),
+      y: row * (TILE_H + TILE_GAP),
+    };
+  }
+
+  function makeTile(path, index) {
+    const { x, y } = cellXY(index);
     const el = document.createElement('div');
     el.className = 'chorus-board-tile';
     el.style.width = TILE_W + 'px';
     el.style.height = TILE_H + 'px';
-    el.style.left = col * (TILE_W + TILE_GAP) + 'px';
-    el.style.top = '0px';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
 
     const hdr = document.createElement('div');
     hdr.className = 'chorus-board-tile-hdr';
@@ -84,7 +99,7 @@ export async function createBoard({
     });
 
     inner.appendChild(el);
-    return { path, col, el, hdr, iframe };
+    return { path, index, el, hdr, iframe };
   }
 
   function addPage(path) {
@@ -95,7 +110,8 @@ export async function createBoard({
     return t;
   }
 
-  addPage(initialPath || 'index.html');
+  // Populate the grid with every page the caller handed us.
+  for (const p of initialPages) addPage(p);
 
   // Hold-space-to-pan — the universal hand-tool modifier. When Space is
   // held we add .pan-mode to the container; the stylesheet flips iframe
@@ -194,8 +210,9 @@ export async function createBoard({
       (rect.height * padding) / TILE_H,
       2,
     );
-    const cx = tile.col * (TILE_W + TILE_GAP) + TILE_W / 2;
-    const cy = TILE_H / 2;
+    const pos = cellXY(tile.index);
+    const cx = pos.x + TILE_W / 2;
+    const cy = pos.y + TILE_H / 2;
     const tx = rect.width / 2 - cx * scale;
     const ty = rect.height / 2 - cy * scale;
     d3Select(container).transition().duration(500).call(
@@ -207,14 +224,17 @@ export async function createBoard({
   function flyToAll(padding = 0.92) {
     const rect = container.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
-    const totalW = tiles.length * TILE_W + Math.max(0, tiles.length - 1) * TILE_GAP;
+    const rows = Math.ceil(tiles.length / numCols);
+    const totalW = Math.min(tiles.length, numCols) * TILE_W
+      + Math.max(0, Math.min(tiles.length, numCols) - 1) * TILE_GAP;
+    const totalH = rows * TILE_H + Math.max(0, rows - 1) * TILE_GAP;
     const scale = Math.min(
       (rect.width * padding) / totalW,
-      (rect.height * padding) / TILE_H,
+      (rect.height * padding) / totalH,
       1,
     );
     const cx = totalW / 2;
-    const cy = TILE_H / 2;
+    const cy = totalH / 2;
     const tx = rect.width / 2 - cx * scale;
     const ty = rect.height / 2 - cy * scale;
     d3Select(container).transition().duration(500).call(

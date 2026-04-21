@@ -2753,26 +2753,66 @@ function boot({ inIframe = false } = {}) {
     state.boardOpen = true;
     // Hand the preview slot over to the board.
     preview.hide();
+    const branchName = state.currentBranch || 'main';
+    const initialPath = state.currentPath || 'index.html';
+    // Fetch the full repo tree at this branch so the board can open with
+    // every HTML file tiled up-front. If the call fails (rate limit /
+    // private repo without auth / network), we quietly fall back to just
+    // the current page — user can still spawn more by clicking links.
+    let pages = [initialPath];
+    try {
+      const tree = await gh.listTree(state.token, OWNER, REPONAME, branchName);
+      const htmlFiles = (tree?.tree || [])
+        .filter((e) => e.type === 'blob' && /\.html?$/i.test(e.path))
+        .map((e) => e.path)
+        .sort(htmlPathSort);
+      if (htmlFiles.length) {
+        // Put initialPath first so the first tile the user sees in the
+        // framed fit is the one they were already looking at.
+        pages = htmlFiles.includes(initialPath)
+          ? [initialPath, ...htmlFiles.filter((p) => p !== initialPath)]
+          : [initialPath, ...htmlFiles];
+      }
+    } catch (err) {
+      console.warn('[chorus] board: listTree failed; falling back to single page', err);
+    }
     try {
       const mod = await import('./board.js');
       const inst = await mod.createBoard({
         hostRoot: root,
-        branchName: state.currentBranch || 'main',
-        initialPath: state.currentPath || 'index.html',
+        branchName,
+        pages,
+        initialPath,
         previewUrlFor,
         onClose: () => {
           state.boardOpen = false;
           state.boardInstance = null;
           // Restore the single-iframe preview for the branch we had open.
-          try { showBranchPreview(state.currentBranch || 'main'); } catch {}
+          try { showBranchPreview(branchName); } catch {}
         },
       });
       state.boardInstance = inst;
     } catch (err) {
       console.warn('[chorus] board open failed', err);
       state.boardOpen = false;
-      try { showBranchPreview(state.currentBranch || 'main'); } catch {}
+      try { showBranchPreview(branchName); } catch {}
     }
+  }
+
+  // Root-level HTML files first, then deeper. Within a level, 'index.html'
+  // takes priority, then alphabetical. Matches how someone would read the
+  // sitemap naturally.
+  function htmlPathSort(a, b) {
+    const aDepth = (a.match(/\//g) || []).length;
+    const bDepth = (b.match(/\//g) || []).length;
+    if (aDepth !== bDepth) return aDepth - bDepth;
+    const aBase = a.split('/').pop();
+    const bBase = b.split('/').pop();
+    const aIsIndex = aBase === 'index.html';
+    const bIsIndex = bBase === 'index.html';
+    if (aIsIndex && !bIsIndex) return -1;
+    if (!aIsIndex && bIsIndex) return 1;
+    return a.localeCompare(b);
   }
 
   // Figma-style canvas view. Lazy-loads Three.js on first open so the main
