@@ -1271,6 +1271,97 @@ const CSS_TEXT = `
        background or the card header (neither is covered by the iframe). */
   }
 
+  /* 2D board view — lives in the preview-iframe slot rather than full-
+     viewport. Same windowed positioning as preview.js's applyMode. */
+  .chorus-board {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    width: var(--chorus-iframe-width, 62vw);
+    height: var(--chorus-top-height, 66vh);
+    border-radius: 10px;
+    border: 1px solid #bbb;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    background: radial-gradient(ellipse at center, #141424 0%, #0a0a14 70%);
+    z-index: 2147483640;
+    pointer-events: auto;
+    cursor: grab;
+    user-select: none;
+    animation: chorusFadeIn 160ms ease;
+  }
+  .chorus-board:active { cursor: grabbing; }
+  .chorus-board-inner {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+  .chorus-board-close {
+    position: absolute;
+    top: 10px; right: 12px;
+    z-index: 10;
+    width: 30px; height: 30px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    font-size: 14px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--t-fast);
+    pointer-events: auto;
+  }
+  .chorus-board-close:hover { background: rgba(255, 255, 255, 0.22); }
+  .chorus-board-hint {
+    position: absolute;
+    bottom: 10px; left: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    font-family: var(--font-sans); font-size: 11px;
+    padding: 5px 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    z-index: 10;
+    pointer-events: none;
+    max-width: calc(100% - 60px);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .chorus-board-tile {
+    position: absolute;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, 0.55),
+      0 8px 20px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+  .chorus-board-tile-hdr {
+    height: 34px;
+    padding: 0 14px;
+    display: flex; align-items: center;
+    background: linear-gradient(to bottom, #fafafa, #f3f3f5);
+    border-bottom: 1px solid #e4e4e7;
+    box-sizing: border-box;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    color: #18181b;
+    cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    letter-spacing: -0.01em;
+  }
+  .chorus-board-tile-hdr:hover {
+    background: linear-gradient(to bottom, #f0ecff, #e9e4ff);
+    color: var(--c-accent);
+  }
+  .chorus-board-tile-frame {
+    position: absolute;
+    top: 34px; left: 0;
+    width: 100%; height: calc(100% - 34px);
+    border: 0;
+  }
+
   /* Per-comment action row + pin/branch badges */
   .comment-actions {
     display: flex; align-items: center; gap: 6px;
@@ -2192,6 +2283,11 @@ function boot({ inIframe = false } = {}) {
     // imported on first open; instance holds a { destroy } handle.
     canvasOpen: false,
     canvasInstance: null,               // { destroy } or null
+
+    // 2D board view — lives INSIDE the preview-iframe's slot rather than
+    // full-viewport; shows every page of the current branch.
+    boardOpen: false,
+    boardInstance: null,
   };
 
   if (savedToken && savedUser) auth.setAuth(savedToken, savedUser);
@@ -2632,6 +2728,38 @@ function boot({ inIframe = false } = {}) {
     renderLightbox();
   }
 
+  // 2D board view — replaces the preview iframe's content with a Figma-
+  // style pannable board of pages on the current branch. Unlike the
+  // full-viewport canvas (which shows every branch × every page in 3D),
+  // the board is in-place and scoped to ONE branch. Lazy-loads d3-zoom /
+  // d3-selection from esm.sh on first open.
+  async function openBoardView() {
+    if (state.boardOpen) return;
+    state.boardOpen = true;
+    // Hand the preview slot over to the board.
+    preview.hide();
+    try {
+      const mod = await import('./board.js');
+      const inst = await mod.createBoard({
+        hostRoot: root,
+        branchName: state.currentBranch || 'main',
+        initialPath: state.currentPath || 'index.html',
+        previewUrlFor,
+        onClose: () => {
+          state.boardOpen = false;
+          state.boardInstance = null;
+          // Restore the single-iframe preview for the branch we had open.
+          try { showBranchPreview(state.currentBranch || 'main'); } catch {}
+        },
+      });
+      state.boardInstance = inst;
+    } catch (err) {
+      console.warn('[chorus] board open failed', err);
+      state.boardOpen = false;
+      try { showBranchPreview(state.currentBranch || 'main'); } catch {}
+    }
+  }
+
   // Figma-style canvas view. Lazy-loads Three.js on first open so the main
   // chorus bundle stays lean — the ~150 KB three import only hits the wire
   // when the user actually wants the canvas.
@@ -2790,9 +2918,13 @@ function boot({ inIframe = false } = {}) {
           <span class="menu-check"></span>
           <span>Features</span>
         </button>
+        <button class="menu-item" data-action="open-board-menu">
+          <span class="menu-check"></span>
+          <span>Board (this branch)</span>
+        </button>
         <button class="menu-item" data-action="open-canvas-menu">
           <span class="menu-check"></span>
-          <span>Canvas (beta)</span>
+          <span>Canvas 3D (beta)</span>
         </button>
         <div class="menu-divider"></div>
         <div class="menu-section-label">View</div>
@@ -4712,6 +4844,11 @@ function boot({ inIframe = false } = {}) {
       state.menuOpen = false;
       renderPanel();       // close the menu UI immediately
       openCanvasView();
+    });
+    on('[data-action="open-board-menu"]', 'click', () => {
+      state.menuOpen = false;
+      renderPanel();
+      openBoardView();
     });
     on('[data-action="goto-threads"]', 'click', () => {
       navigate('threadList');
